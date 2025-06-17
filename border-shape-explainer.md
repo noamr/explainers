@@ -9,7 +9,7 @@ Currently, the toolkit for web authors to decorate elements in a non-rectangular
 - SVG: this requires setting up a tree of elements separate from styling, and clip the element separately.
 - `clip-path`: this clips the border, as well as effects like shadow/blur.
 - `corner-shape`: this allows more expressive shapes than before, however it is still limited to box-like shapes.
-  
+
 ## Proposed solution
 The proposed solution is to allow authors to specify one or two basic shapes that define the border's contour.
 The given shape(s) would be strokes, and if two are given, the area between them would be filled.
@@ -24,6 +24,13 @@ This doesn't seem right because clipping a shape can be useful regardless of bor
 ### Taking the colors and width from the `border-*` properties
 This is still under consideration, but it's complicated because it's unclear which "side" maps to which parts of an arbitrary shape.
 Using `fill` and `stroke` is more of a straightforward solution.
+
+This is also why `corner-shape` was needed despite of `border-shape` being more expressive.
+`border-shape` and `corner-shape` have a different set of constraints, expressions as well as ergonomics, that are not possible with the alternative.
+While `border-shape` allows full expression with shapes, this kind of flexibility comes at a cost: some of the aforementioned traditional "border" features become infeasible.
+With `corner-shape`, we can have superellipse-defined corners and the full expression of 4 borders and 4 corners (width, color, style),
+while with the general purpose `border-shape` the solution remains a uniform stroke width and color, plus whatever style of stroking available (joins, dash-array, caps).
+
 
 ## Privacy & Security Questionnaire
 
