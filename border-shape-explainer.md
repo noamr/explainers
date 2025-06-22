@@ -1,37 +1,59 @@
-# Free-form borders with `border-shape`
+#  `border-shape`: Beyond Rectangular Borders
 
-## User need
-Non-rectangular shapes are already everywhere on the web. However, the current limitations of the web platform allow using them only for clipping, or for standalone shapes in the form of SVG.
-Creating a simple speech bubble that paints its border and clips its internal contents requires both clip-path, SVG, and multiple elements.
+You know how much of the web goes beyond simple rectangles these days. Think of speech bubbles, custom buttons, or unique layout elements. While the web platform lets us create these with tools like `clip-path` or SVG, adding a border to them or clipping their content cleanly can be surprisingly tricky.
 
-## Existing Solutions
-Currently, the toolkit for web authors to decorate elements in a non-rectangular way contains:
-- SVG: this requires setting up a tree of elements separate from styling, and clip the element separately.
-- `clip-path`: this clips the border, as well as effects like shadow/blur.
-- `corner-shape`: this allows more expressive shapes than before, however it is still limited to box-like shapes.
+### The Challenge with Current Solutions
 
-## Proposed solution
-The proposed solution is to allow authors to specify one or two basic shapes that define the border's contour.
-The given shape(s) would be strokes, and if two are given, the area between them would be filled.
-The area inside the internal shape would clip the content for `overflow: hidden` (or scroll/clip etc.)
-This is documented in the [draft spec](https://drafts.csswg.org/css-borders-4/#border-shape).
+Right now, if you want a non-rectangular shape with a border and content that stays within those bounds, you often run into limitations:
 
-## Alternatives considered
+* **SVG:** Powerful, but it means managing a separate set of elements from your regular HTML structure. If you just want a border, it can feel like overkill.
+* **`clip-path`:** This is great for cutting out custom shapes, but it clips everything – including any shadows or visual effects you might want on your border. It doesn't actually *draw* a border.
+* **`corner-shape`:** This CSS property offers more advanced control over rounded corners, allowing for more organic or complex corner designs. However, it's still fundamentally about modifying a box's corners, not creating entirely freeform shapes.
 
-### Changing the semantics of `clip-path`
-This doesn't seem right because clipping a shape can be useful regardless of border-shaping.
+Consider a simple speech bubble: making its border paint correctly and clipping its internal text usually requires a combination of `clip-path`, SVG, and multiple HTML elements. It's not ideal for something seemingly straightforward.
 
-### Taking the colors and width from the `border-*` properties
-This is still under consideration, but it's complicated because it's unclear which "side" maps to which parts of an arbitrary shape.
-Using `fill` and `stroke` is more of a straightforward solution.
+---
 
-This is also why `corner-shape` was needed despite of `border-shape` being more expressive.
-`border-shape` and `corner-shape` have a different set of constraints, expressions as well as ergonomics, that are not possible with the alternative.
-While `border-shape` allows full expression with shapes, this kind of flexibility comes at a cost: some of the aforementioned traditional "border" features become infeasible.
-With `corner-shape`, we can have superellipse-defined corners and the full expression of 4 borders and 4 corners (width, color, style),
-while with the general purpose `border-shape` the solution remains a uniform stroke width and color, plus whatever style of stroking available (joins, dash-array, caps).
+## The Solution: `border-shape`
 
+The new `border-shape` CSS property aims to simplify this by letting you define the precise contour of an element's border. Imagine being able to draw your border with a custom shape, just like you would in a design program!
 
+Here's how it works:
+
+* **Define Your Contour:** You can specify one or two basic shapes that will serve as the "strokes" of your border.
+* **Filled Area:** If you provide two shapes, the space between them will be filled in, creating a solid border.
+* **Content Clipping:** The inner shape you define also controls how the element's content is clipped, much like `overflow: hidden` but following your custom shape.
+
+You can dive deeper into the technical details in the [draft specification](https://drafts.csswg.org/css-borders-4/#border-shape).
+
+---
+
+### Why a New Property?
+
+You might wonder why we need `border-shape` when we have `clip-path` or `corner-shape`.
+
+* **`clip-path` vs. `border-shape`:** While `clip-path` is useful for general clipping, it doesn't give you a true border that can be styled independently. `border-shape` is specifically for painting the border itself.
+* **`corner-shape` vs. `border-shape`:** `corner-shape` excels at creating advanced, box-like shapes with custom corners (like squricles and diagonals), allowing you to fine tune them using all the traditional border properties (width, color, style for each side). `border-shape`, on the other hand, offers full artistic freedom for any shape, but with a more limited approach to border styling - a uniform stroke width and color, along with standard stroking styles (like joins, dashes, and caps). Each serves a distinct purpose, offering different levels of flexibility and control.
+
+---
+
+### How it Renders (Behind the Scenes)
+
+While this is still being discussed and may evolve, here's the current thinking on how `border-shape` would render:
+
+* An element can have **zero, one, or two `border-shape`s**.
+* If an element has no `border-shape`, it renders its traditional box borders as normal.
+* If you specify one `border-shape`, it acts as both the inner and outer contour.
+* When a `border-shape` is present, the regular CSS `border` property (e.g., `border-width`, `border-color`) is **not rendered**, but it still **influences layout**. This means you can use `border-width` to control spacing even if your border is a custom shape, and also use it to affect the inner shape, by using the `padding-box` keyword when specifying that shape.
+* The two `border-shape`s essentially define an **"inner" and "outer" boundary**.
+    * The **inner contour** determines how `overflow` content is clipped.
+    * The **outer contour** determines the extent to which the border is filled. The area between the inner and outer contoured is filed using CSS `fill-*` properties similar to how SVG elements are filled).
+    * Both contours are **stroked** using CSS `stroke` properties (again, like in SVG). The stroke width does not affect layout in any way.
+    * The **outer contour** alsos determine how `box-shadow`s and `outline`s are rendered. Both properties follow the outer-contour. `outline` acts as an additional stroke on that contour, using the outline's color, style and width.
+
+---
+
+This new `border-shape` property promises to make creating complex, non-rectangular designs on the web much more straightforward and efficient.
 ## Privacy & Security Questionnaire
 
 01.  What information does this feature expose,
