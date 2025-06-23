@@ -49,7 +49,7 @@ While this is still being discussed and may evolve, here's the current thinking 
     * The **inner contour** determines how `overflow` content is clipped.
     * The **outer contour** determines the extent to which the border is filled. The area between the inner and outer contoured is filed using CSS `fill-*` properties similar to how SVG elements are filled).
     * Both contours are **stroked** using CSS `stroke` properties (again, like in SVG). The stroke width does not affect layout in any way.
-    * The **outer contour** alsos determine how `box-shadow`s and `outline`s are rendered. Both properties follow the outer-contour. `outline` acts as an additional stroke on that contour, using the outline's color, style and width.
+    * The **outer contour** alsos determine how `box-shadow`, `backdrop-filter` and `outline`s are rendered. Those properties follow the outer-contour. `outline` acts as an additional stroke on that contour, using the outline's color, style and width.
 
 ---
 
