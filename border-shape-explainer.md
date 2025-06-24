@@ -47,10 +47,10 @@ While this is still being discussed and may evolve, here's the current thinking 
 * If you specify one `border-shape`, it acts as both the inner and outer contour.
 * When a `border-shape` is present, the regular CSS `border` property (e.g., `border-width`, `border-color`) is **not rendered**, but it still **influences layout**. This means you can use `border-width` to control spacing even if your border is a custom shape, and also use it to affect the inner shape, by using the `padding-box` keyword when specifying that shape.
 * The two `border-shape`s essentially define an **"inner" and "outer" boundary**.
-    * The **inner contour** determines how `overflow` content is clipped.
-    * The **outer contour** determines the extent to which the border is filled. The area between the inner and outer contoured is filed using CSS `fill-*` properties similar to how SVG elements are filled).
+    * The **outer contour** determines how `box-shadow`, `backdrop-filter`, `shape-outside: border-box`, and `outline`s are rendered. Those properties follow the outer-contour. `outline` acts as an additional stroke on that contour, using the outline's color, style and width.
+    * The **inner contour** determines how `overflow` content is clipped, and potentially the extents of `shape-outside: padding-box`.
+    * The area between the inner and outer contoured is filed using CSS `fill-*` properties similar to how SVG elements are filled).
     * Both contours are **stroked** using CSS `stroke` properties (again, like in SVG). The stroke width does not affect layout in any way.
-    * The **outer contour** alsos determine how `box-shadow`, `backdrop-filter` and `outline`s are rendered. Those properties follow the outer-contour. `outline` acts as an additional stroke on that contour, using the outline's color, style and width.
 
 ---
 
