@@ -208,6 +208,7 @@ All they have to do is match their views with URL routes, and then stream the ap
 ## Open issues
 1. Perhaps it could be confusing that an element performs navigation interception? Does this need an opt-in in the `<head>`?
 1. This architecture might lead to sending different responses for the same URL based on headers, e.g. a partial document response. This doesn’t work well cross-browser and cross-CDN. Perhaps the partial responses need a separate URL, with the `src` attribute, and the intercepted navigation responses should be expected to be full?
+1. How does this interact with declarative shadow DOM? Can parts of a declarative shadow DOM be streamed in this way?
 
 ## Considered Alternatives & Tradeoffs
 ### IFrames
