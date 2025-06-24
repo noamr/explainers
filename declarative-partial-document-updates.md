@@ -6,6 +6,7 @@ See https://github.com/whatwg/html/issues/2142 and https://github.com/whatwg/htm
 ## Status of this document
 This is an initial explainer for introducing the problem space and a few proposed solutions.
 See this as a starting point for discussion rather than a finished product.
+Note: it's temporarily in a personal repo until the WICG proposal is accepted.
 
 ## Overview
 ### Full page refresh
