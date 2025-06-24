@@ -188,13 +188,14 @@ In an app that contains matching views, the developer does not have to worry abo
 All they have to do is match their views with URL routes, and then stream the appropriate new content wrapped in `<template for=... mode...>` snippets.
 #### Details of `<view>`
 
+2. Multiple views can be present at the same time, and updated together using the same response. The response can be *identical* to a full document navigation response, as long as the view content is wrapped in `<template for>`. 
 1. A `view` would also have lifecycle events to enable developers to fine-tune its behavior using JS.
-2. Declarative view transitions work out of the box
-3. The “view update” request is identical to the navigation request. Content from the fetched document response is streamed, and added to the view in chunks, like normal HTML streaming.
-4. While streaming content, the `<view>` would get a pseudo-class (:partial?) activated. This pseudo-class can be used in ordinary document content streaming as well, to avoid the visual effect of streaming.
-5. A partial response can include either a full document or just the modified templates, the UA should be able to work with both as valid HTML. 
-6. A `<view>` can have `<template status=”loading|error”>` children and/or matching `<template for= mode=loading|error>` elements, which, if available, get displayed instead of the regular content while new content is loading or if there is an error fetching.
-7. When the pattern stops matching, the view receives a `:deactivated` pseudo-class, and there is a UA style of `view:deactivated (content-visibility: hidden; width: 0; height: 0; interactivity: inert)` that can be overridden by the developer. Also, its contents are not DOM selectable, like a `<template>` element.
+3. Declarative view transitions work out of the box.
+4. The “view update” request is identical to the navigation request. Content from the fetched document response is streamed, and added to the view in chunks, like normal HTML streaming.
+5. While streaming content, the `<view>` would get a pseudo-class (:partial?) activated. This pseudo-class can be used in ordinary document content streaming as well, to avoid the visual effect of streaming.
+6. A partial response can include either a full document or just the modified templates, the UA should be able to work with both as valid HTML. 
+7. A `<view>` can have `<template status=”loading|error”>` children and/or matching `<template for= mode=loading|error>` elements, which, if available, get displayed instead of the regular content while new content is loading or if there is an error fetching.
+8. When the pattern stops matching, the view receives a `:deactivated` pseudo-class, and there is a UA style of `view:deactivated (content-visibility: hidden; width: 0; height: 0; interactivity: inert)` that can be overridden by the developer. Also, its contents are not DOM selectable, like a `<template>` element.
 1. A request for an intercepted partial update contains header information about the views that are about to be updated, and about the fact that it's a partial update.
 
 ## Potential future enhancements
@@ -223,6 +224,9 @@ By allowing partial updates together with a link between the document's URL (whi
 ### HTML "include"
 HTML includes on their own also feel a bit like a development-time concept with few UX benefits. While the concept of `<view>` can certainly take a form similar to HTML includes with a `src`,
 the relationship with the document's URL intercepted navigations, and transitions, potentially adds value to navigation smoothness beyond DX.
+
+In addition, HTML includes require special server-side handling, as well as separate fetches for each view. The `<view match>` and `<template for>` consolidate all the content for a single navigation-driven document update into a normal HTML response.
+This makes them, arguably, a smaller step to take than HTML includes, with HTML includes being an additional step for some use cases.
 
 ### Enhancing `<slot>`
 This is possible, and has similarities with declarative shadow DOM, in terms of out-of-order content. It might be more complex/confusing than its worth as a `<view>`, as in the right context a `<slot>` and a `<view>` behave massively differently.
