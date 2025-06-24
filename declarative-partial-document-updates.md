@@ -229,5 +229,7 @@ This is possible, and has similarities with declarative shadow DOM, in terms of 
 This architecture primarily focuses on extending the ergonomics and capabilities of same-page applications. It is possible to explore other avenues that work in a more MPA/cross-document manner.
 However, it is unclear what that’s going to look like, and would potentially lead to an IFrame-based architecture.
 
-
-
+## Lastly, is the web platform competing with frameworks?
+The direction of this proposal is to tackle the specific aspects of out-of-order streaming and composable fragments, which are issues that frameworks tackle as well.
+However, this proposal is agnostic to a lot of DX-time aspects of frameworks, and in particular templating or how A JS or JSON-based model is compiled to HTML.
+Frameworks can provide a lot of value in terms of opinionated development time ideas, which can be incorporated with stronger browser foundations around seamless navigation and content streaming.
