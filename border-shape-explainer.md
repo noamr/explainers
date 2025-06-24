@@ -8,6 +8,7 @@ Right now, if you want a non-rectangular shape with a border and content that st
 
 * **SVG:** Powerful, but it means managing a separate set of elements from your regular HTML structure. If you just want a border, it can feel like overkill.
 * **`clip-path`:** This is great for cutting out custom shapes, but it clips everything – including any shadows or visual effects you might want on your border. It doesn't actually *draw* a border.
+  Achieving a `border-shape`-like effect with `clip-path` is quite tricky, as it requires nesting the inner clipping element in the outer one, and dealing with `box-shadow` separately. 
 * **`corner-shape`:** This CSS property offers more advanced control over rounded corners, allowing for more organic or complex corner designs. However, it's still fundamentally about modifying a box's corners, not creating entirely freeform shapes.
 
 Consider a simple speech bubble: making its border paint correctly and clipping its internal text usually requires a combination of `clip-path`, SVG, and multiple HTML elements. It's not ideal for something seemingly straightforward.
