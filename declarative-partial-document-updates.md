@@ -127,6 +127,15 @@ And also in Astro:
 </html>
 ```
 
+### HotWire / TurboLinks
+
+See https://hotwired.dev/.
+
+The HotWire approach has a lot of similarities with this proposal, and is a source of inspiration.
+In that approach, the navigation response stays the mostly same, and the client side is responsible for replacing parts of the document, mainly the `<body>` modulo "islands".
+
+The approach here is a bit more generic, where the developer decides which parts get replaced and which stay.
+
 ## This Proposal
 The goal of this proposal is to see whether the platform can help with this kind of experience, by introducing composable fragments (views, because the word fragment is used elsewhere...) and declarative partial document updates as a platform (HTML) primitive.
 It consists of two parts, the first one standing on its own and the second one building on top of it.
@@ -153,7 +162,8 @@ Loading...
 
 1. The `for` attribute behaves like `<label for>`, pointing to an ID
 2. `mode` can be `replace`, `append` or `prepend`, and be extended in the future to include things like `merge`, `loading` and `error`.
-3. When a `<template for>` is discovered, its contents are streamed into its target element.
+3. In general, the `<template>` itself does not stay in the DOM, kind of like `<template shadowrootmode>`. However the details of this are TBD.
+5. When a `<template for>` is discovered, its contents are streamed into its target element.
  
 This is, in essence, a proposed solution for https://github.com/whatwg/html/issues/2791. 
 
@@ -210,11 +220,33 @@ All they have to do is match their views with URL routes, and then stream the ap
 1. Perhaps it could be confusing that an element performs navigation interception? Does this need an opt-in in the `<head>`?
 1. This architecture might lead to sending different responses for the same URL based on headers, e.g. a partial document response. This doesn’t work well cross-browser and cross-CDN. Perhaps the partial responses need a separate URL, with the `src` attribute, and the intercepted navigation responses should be expected to be full?
 1. How does this interact with declarative shadow DOM? Can parts of a declarative shadow DOM be streamed in this way?
-2. Interaction with templating proposals such as DOM Parts
-3. Should `<view>` be a regular element in the DOM? Does that prevent it from being part of SVG/MathML/tables etc?
-4. ID refs are notoriously footgunny and it's hard to get them wrong. However, they are the current referencing enabler of the web platform. Perhaps there is some way to go about refs that improves things for other features as well?
+1. Interaction with templating proposals such as DOM Parts
+1. Should `<view>` be a regular element in the DOM? Does that prevent it from being part of SVG/MathML/tables etc? Perhaps it should be a set of attributes/processing instruction?
+1. ID refs are notoriously footgunny and it's hard to get them wrong. However, they are the current referencing enabler of the web platform. Perhaps there is some way to go about refs that improves things for other features as well?
+
 
 ## Considered Alternatives & Tradeoffs
+
+### HTML "include"
+
+The `<template for>` / `<view>` proposal puts HTML streaming at the forefront rather than HTML includes.
+This choice might seem surprising, and is open for debate, and has a few trade offs.
+In general, however, those approaches do not conflict and either can be added as an enhancement.
+
+The main theme of `<template for>` is that it is not opinionated about which parts of the DOM can be dynamically updated.
+Anything in the DOM with an ID (or with any other form of reference like CSS selectors if we choose to go down that route) can be streamed into with a `<template for>` snippet.
+It can be a `<view>` but it can also be appending into a `<ul>`. To achieve this with HTML includes we'd need to do something like add processing instructions with a URL in multiple parts of the DOM, or somehow treat the include element in a special way.
+
+In addition, HTML includes require that each place in the DOM that can be dynamically updated in this way needs to have a URL and an endpoint that knows how to serve it individually.
+Instead, in the streaming approach, the process of *navigating* is where this decision is made and all the fresh content is generated.
+The navigation response can update one, multiple or no parts of the DOM, as long as they're referrable, and there is no need to keep multiple individual `<view>` requests in sync.
+In fact, streaming itself is optional. The important bit is that a navigation response carries all of the updated state in a somewhat "atomic" manner.
+ 
+An HTML include by itself, without the view-style navigation, would require some added semantics (probably script?) as to when it is re-fetched from its URL.
+And if we do connect it with view-style navigation, it becomes a "simplified" combination of `<view>` and `<template for>`, where we know in advance that this navigation is going to update this view, and reach for a particular URL to grab this information.
+
+
+
 ### IFrames
 Too many gotchas and constraints, in term of layout/UI and ergonomics of crossing documents. This approach tries to work with how modern web development apps work, where the fragments are part of the same document.
 
@@ -223,13 +255,6 @@ The HTMX approach, where a form or link can target an element for its output, is
 In some ways, it overlaps with other concepts being developed in the web platform, such as invokers.
 In any case, the HTMX approach feels more like a development-time concept that the web platform does not need to be opinionated about.
 By allowing partial updates together with a link between the document's URL (which is a UX concept, as that URL can be shared, QRed, linked etc) and the composable fragment.
-
-### HTML "include"
-HTML includes on their own also feel a bit like a development-time concept with few UX benefits. While the concept of `<view>` can certainly take a form similar to HTML includes with a `src`,
-the relationship with the document's URL intercepted navigations, and transitions, potentially adds value to navigation smoothness beyond DX.
-
-In addition, HTML includes require special server-side handling, as well as separate fetches for each view. The `<view match>` and `<template for>` consolidate all the content for a single navigation-driven document update into a normal HTML response.
-This makes them, arguably, a smaller step to take than HTML includes, with HTML includes being an additional step for some use cases.
 
 ### Enhancing `<slot>`
 This is possible, and has similarities with declarative shadow DOM, in terms of out-of-order content. It might be more complex/confusing than its worth as a `<view>`, as in the right context a `<slot>` and a `<view>` behave massively differently.
