@@ -34,6 +34,10 @@ You can dive deeper into the technical details in the [draft specification](http
 You might wonder why we need `border-shape` when we have `clip-path` or `corner-shape`.
 
 * **`clip-path` vs. `border-shape`:** While `clip-path` is useful for general clipping, it doesn't give you a true border that can be styled independently. `border-shape` is specifically for painting the border itself.
+
+![image](https://github.com/user-attachments/assets/5ba4e622-f341-446b-b025-ea8e27d39088)
+
+
 * **`corner-shape` vs. `border-shape`:** `corner-shape` excels at creating advanced, box-like shapes with custom corners (like squricles and diagonals), allowing you to fine tune them using all the traditional border properties (width, color, style for each side). `border-shape`, on the other hand, offers full artistic freedom for any shape, but with a more limited approach to border styling - a uniform stroke width and color, along with standard stroking styles (like joins, dashes, and caps). Each serves a distinct purpose, offering different levels of flexibility and control.
 
 ---
