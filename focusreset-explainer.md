@@ -56,11 +56,21 @@ This proposal is an early design sketch by Chrome Web Platform to describe the p
 
 ## Introduction
 
-When the currently focused element in a document (or one of its ancestors, shadow hosts, or navigable containers) is removed from the DOM, the HTML Standard's [node-remove focus fixup rule](https://html.spec.whatwg.org/multipage/infrastructure.html#node-remove-focus-fixup) synchronously resets the document's focused area to its viewport (`document.body` / `document.documentElement`). Crucially, this removal fixup does **not** run the unfocusing steps or focus update steps—meaning **no `blur`, `focusout`, or `change` events are fired**.
+Users who navigate the web with a keyboard, switch device, or screen reader depend on focus staying in a predictable place as they interact with a page. In modern web applications, however, the currently focused element is frequently removed from the DOM as a normal part of using the interface—for example, when a user deletes an item from a list, clicks a "Next" button that swaps out a step inside a modal dialog, filters a table, or receives a live DOM update that re-renders part of the page.
 
-Because no event is fired when focus is lost due to DOM removal, web applications, UI component libraries, and assistive keyboard tools have no built-in way to react and move focus to a sensible fallback element. Today, authors must choose between broken keyboard accessibility (where focus is silently dropped back to `document.body`), `setInterval` polling of `document.activeElement`, or attaching a `MutationObserver({ childList: true, subtree: true })` to the entire document.
+When the focused element (or an ancestor containing it) is removed from the DOM, the browser synchronously resets focus to the viewport (`document.body` / `document.documentElement`) via the HTML Standard's [node-remove focus fixup rule](https://html.spec.whatwg.org/multipage/infrastructure.html#node-remove-focus-fixup)—**without firing `blur` or `focusout`**. When an application or component library does not realize that focus was reset:
 
-This proposal introduces a `focusreset` event (and a corresponding `onfocusreset` event handler IDL attribute) on `Document`. Whenever a focused element is removed from a focused document—resetting focus to the viewport—the document is marked as having a pending focus reset. In the mutation observer microtask checkpoint (immediately after `MutationObserver` callbacks and `slotchange` events, and before the next rendering update), if focus has not been explicitly moved to another element and the document still has focus, a `focusreset` event is fired at `Document`.
+- **Users lose their place on the page**: Keyboard focus is silently dropped back to the top of the document (`document.body`), forcing the user to `Tab` through the entire page header, navigation bar, and sidebar just to get back to the list or toolbar they were using.
+- **Focus escapes modal dialogs and overlays**: In a modal dialog or drawer, removing a focused button (such as a "Confirm" or "Next step" button) silently moves focus to `document.body` outside the dialog, allowing the user's next `Tab` press to wander into background content that should be inert or hidden behind a backdrop.
+- **Assistive technologies lose context**: Screen-reader users and keyboard-navigation tool users suddenly lose their active cursor without warning, with no announcement or visual focus ring indicating where focus went.
+
+Because the platform fires no event when focus is lost on DOM removal, UI component libraries and accessibility tools have been forced to invent expensive, fragile workarounds in practice just to protect users from losing focus:
+
+- **Observing every DOM mutation in the document**: [Radix UI's `FocusScope`](https://github.com/radix-ui/primitives/blob/main/packages/react/focus-scope/src/focus-scope.tsx#L122-L165) attaches a `MutationObserver({ childList: true, subtree: true })` to `document.body` whenever a dialog or focus scope is open, running a callback on *every* DOM mutation on the page solely to check whether `document.activeElement` silently became `document.body` so it can pull focus back into the dialog. Similarly, [`focus-trap`](https://github.com/focus-trap/focus-trap/blob/master/index.js#L981-L1035) attaches a subtree `MutationObserver` and walks every `removedNodes` list to check whether the removed node held focus.
+- **Polling `document.activeElement` on a timer**: [Material UI's `FocusTrap`](https://github.com/mui/material-ui/blob/master/packages/mui-material/src/Unstable_TrapFocus/FocusTrap.tsx#L360-L377) runs a recurring `setInterval` timer that polls `doc.activeElement?.tagName === 'BODY'` to detect when the focused element has disappeared and restore focus into the trap. Browser extensions like [Tridactyl](https://github.com/tridactyl/tridactyl/blob/f49e1c94bcd481fdc86fb219335bafc4ce0f25ab/src/content.ts#L180-L187) similarly poll `document.activeElement` every 200ms in every tab because `blur` and `focusout` do not fire when the active element is removed—waking up the CPU continuously and still leaving a window where focus is broken between timer ticks.
+- **Inconsistent behavior across browsers**: While Gecko and WebKit follow the HTML Standard by not firing `blur` on removal, Blink has historically been unable to remove its legacy synchronous `blur`-on-removal behavior without breaking sites and accessibility tools that have no other signal ([whatwg/html#12842](https://github.com/whatwg/html/issues/12842)).
+
+This proposal introduces a `focusreset` event (and a corresponding `onfocusreset` event handler IDL attribute) on `Document`. Whenever a focused element is removed from a focused document—resetting focus to the viewport—the document is marked as having a pending focus reset. In the mutation observer microtask checkpoint (immediately after `MutationObserver` callbacks and `slotchange` events, and before the next rendering update), if focus has not been explicitly moved to another element and the document still has focus, a `focusreset` event is fired at `Document`. This gives applications and UI libraries a direct, zero-overhead, interoperable way to restore a user's focus before the next frame is even painted.
 
 ## Goals
 
@@ -78,14 +88,42 @@ This proposal introduces a `focusreset` event (and a corresponding `onfocusreset
 
 ## User research
 
-Investigation in [whatwg/html#12842](https://github.com/whatwg/html/issues/12842) showed that major accessibility primitives, component libraries, and keyboard navigation tools across the web ecosystem have had to implement expensive or fragile workarounds for the lack of an event when the focused element is removed from the DOM:
+Investigation in [whatwg/html#12842](https://github.com/whatwg/html/issues/12842) examined how widely used UI component libraries and keyboard-navigation tools handle focus loss when the active element is removed from the DOM, and why their current workarounds fall short in practice:
 
-- **[Radix UI (`FocusScope`)](https://github.com/radix-ui/primitives/blob/main/packages/react/focus-scope/src/focus-scope.tsx#L122-L165)**: Registers a `MutationObserver` on `document.body` with `{ childList: true, subtree: true }` whenever a focus scope is active solely to detect when `document.activeElement` silently becomes `document.body` after a focused child is removed, so it can refocus the dialog container.
-- **[`focus-trap`](https://github.com/focus-trap/focus-trap/blob/master/index.js#L981-L1035)**: Observes DOM mutations across the trap subtree and inspects every `removedNodes` entry to check whether the removed node was the most recently focused node inside the trap.
-- **[Material UI (`FocusTrap`)](https://github.com/mui/material-ui/blob/master/packages/mui-material/src/Unstable_TrapFocus/FocusTrap.tsx#L360-L377)**: Uses a recurring `setInterval` timer to poll `doc.activeElement?.tagName === 'BODY'` and restore focus into the trap when the previously focused element disappears.
-- **[Tridactyl](https://github.com/tridactyl/tridactyl/blob/f49e1c94bcd481fdc86fb219335bafc4ce0f25ab/src/content.ts#L180-L187)**: Runs a 200ms `setInterval` timer alongside `focusout` listeners with the comment: *"On top of blur/focusout events, we need to periodically check the activeElement is the one we want because blur/focusout events aren't always triggered when document.activeElement changes."*
+1. **Document-wide `MutationObserver` watching `document.activeElement` ([Radix UI `FocusScope`](https://github.com/radix-ui/primitives/blob/main/packages/react/focus-scope/src/focus-scope.tsx#L122-L165))**:
+   ```js
+   // Simplified from Radix UI FocusScope:
+   // If the focused element gets removed from the DOM, browsers will move focus
+   // back to the document.body. In this case, we move focus to the container.
+   const handleMutations = (mutations) => {
+     const focusedElement = document.activeElement;
+     if (focusedElement !== document.body) return;
+     for (const mutation of mutations) {
+       if (mutation.removedNodes.length > 0) focus(container);
+     }
+   };
+   const mutationObserver = new MutationObserver(handleMutations);
+   mutationObserver.observe(document.body, { childList: true, subtree: true });
+   ```
+   - **Limitations**: Forces the browser to record and deliver mutation records for *every* DOM insertion and removal anywhere in `document.body` while a modal is open, fails to observe removals inside Shadow DOM trees, and can misfire if an unrelated node is removed while `document.activeElement` already happened to be `document.body`.
 
-At the browser engine level, Gecko and WebKit follow the HTML Standard by not firing `blur` or `focusout` when a focused node is removed, whereas Blink has historically struggled to remove its legacy `blur`-on-removal behavior due to compatibility breakage in sites and tools that rely on an event firing when focus is lost. Providing `focusreset` gives authors and libraries a purpose-built, interoperable primitive without the hazards of synchronous removal events.
+2. **Subtree `MutationObserver` scanning `removedNodes` ([`focus-trap`](https://github.com/focus-trap/focus-trap/blob/master/index.js#L981-L1035))**:
+   - Watches the trap container with `{ childList: true, subtree: true }` and checks whether each removed node contains the most recently focused node (`removedNode.contains(mostRecentlyFocusedNode)`).
+   - **Limitations**: Does not cross Shadow DOM boundaries, requires manual bookkeeping of the last focused node, and runs even if the application code that removed the node already moved focus to a valid replacement element.
+
+3. **Timer polling (`setInterval`) ([Material UI `FocusTrap`](https://github.com/mui/material-ui/blob/master/packages/mui-material/src/Unstable_TrapFocus/FocusTrap.tsx#L360-L377) and [Tridactyl](https://github.com/tridactyl/tridactyl/blob/f49e1c94bcd481fdc86fb219335bafc4ce0f25ab/src/content.ts#L180-L187))**:
+   ```js
+   // Simplified from Tridactyl src/content.ts:
+   // On top of blur/focusout events, we need to periodically check the activeElement
+   // is the one we want because blur/focusout events aren't always triggered when
+   // document.activeElement changes.
+   setInterval(() => {
+     if (document.activeElement !== lastActiveElement) {
+       onFocusChanged();
+     }
+   }, 200);
+   ```
+   - **Limitations**: Causes continuous background CPU wakeups, and leaves a multi-frame gap (hundreds of milliseconds) where keyboard input and screen-reader announcements see lost focus before the timer fires.
 
 ## Use cases
 
