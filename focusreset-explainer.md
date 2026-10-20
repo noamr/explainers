@@ -425,7 +425,7 @@ We considered firing `focusreset` whenever a document's focused area is reset on
 
 ## Stakeholder Feedback / Opposition
 
-- **Chromium**: Positive (proponent; implementation tracking bug: [crbug.com/572677865](https://issues.chromium.org/issues/572677865))
+- **Chromium**: Positive (proponent; ChromeStatus entry: [chromestatus.com/feature/5068521917775872](https://chromestatus.com/feature/5068521917775872); implementation tracking bug: [crbug.com/572677865](https://issues.chromium.org/issues/572677865))
 - **Gecko**: Pending ([mozilla/standards-positions#1469](https://github.com/mozilla/standards-positions/issues/1469); implementation tracking bug: [Mozilla Bug 2081188](https://bugzilla.mozilla.org/show_bug.cgi?id=2081188))
 - **WebKit**: Pending ([WebKit/standards-positions#732](https://github.com/WebKit/standards-positions/issues/732); implementation tracking bug: [WebKit Bug 327387](https://bugs.webkit.org/show_bug.cgi?id=327387))
 - **Accessibility community**: Pending (initial discussion in [whatwg/html#12842](https://github.com/whatwg/html/issues/12842) and WHATNOT meetings; broader accessibility community review is pending)
@@ -436,6 +436,7 @@ We considered firing `focusreset` whenever a document's focused area is reset on
 - [WHATWG HTML PR #13050: Add the `focusreset` event](https://github.com/whatwg/html/pull/13050)
 - [WHATWG DOM PR #1512: Add `signal a focus reset` and `focusreset` event](https://github.com/whatwg/dom/pull/1512)
 - [Web Platform Tests PR #63595: `focusreset` event tests](https://github.com/web-platform-tests/wpt/pull/63595)
+- [ChromeStatus Entry: The `focusreset` event](https://chromestatus.com/feature/5068521917775872)
 - [Mozilla Standards Position #1469](https://github.com/mozilla/standards-positions/issues/1469)
 - [WebKit Standards Position #732](https://github.com/WebKit/standards-positions/issues/732)
 - [MDN Issue #876: Document `focusreset` event](https://github.com/mdn/mdn/issues/876)
