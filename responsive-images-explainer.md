@@ -18,15 +18,15 @@ Every responsive image on the web sits on a trade-off curve between **visual sha
 - Pick a candidate that is too small, and the user sees a **blurry, pixelated image**.
 - Pick a candidate that is too large, and the user pays in **wasted bandwidth, slower page loads, and higher memory use**.
 
-When `srcset` and `sizes` were designed in 2014, the specification assumed that **User Agents** would manage this trade-off automatically. The spec gave authors a minimal 1D width hint (`sizes`) and left candidate selection *"implementation-defined"* so browsers could experiment with global bandwidth-saving heuristics.
+When `srcset` and `sizes` were designed in 2014, the specification gave authors a minimal 1D width hint (`sizes`) and left candidate selection *"implementation-defined"* so browsers could experiment with bandwidth-saving heuristics.
 
-A decade of production experience has shown that this responsibility was placed on the wrong party:
-- **User Agents are built for interoperability, not context-specific business trade-offs.** A browser has no way of knowing whether a given `<img>` is a conversion-critical product photo (where blurriness hurts sales), a medical or technical diagram (where legibility is essential), or the 40th thumbnail in a scrollable feed (where saving 50% of bytes improves LCP with zero noticeable quality loss).
-- **Global UA heuristics backfired.** When Chrome tried to save bandwidth globally using geometric-mean density thresholds, site owners complained about blurry images and worked around the browser by lying in `sizes` (e.g., `sizes="200vw"`). Chrome ultimately removed those heuristics in late 2024, and today all three major engines run the exact same deterministic selection rule.
+A decade of production experience has clarified where browser behavior should be standardized and where websites need direct control:
+- **User Agents are designed for interoperability, while websites are best suited to measure context-specific business trade-offs.** A browser cannot easily tell whether a given `<img>` is a conversion-critical product photo (where blurriness hurts sales), a technical diagram (where legibility is essential), or the 40th thumbnail in a scrollable feed (where saving 50% of bytes improves LCP with negligible quality loss).
+- **Browser selection has largely converged and can be standardized.** Chrome retired its density-rounding and `Save-Data` clamping experiments in late 2024, meaning all three major engines now share the same baseline density threshold (`first candidate >= targetDensity`). Chrome also retains a useful optimization to avoid downloading a smaller candidate when a higher-resolution source is already loaded—behavior that can be **standardized directly** rather than leaving the entire selection algorithm implementation-defined.
 
 **The theme of this proposal is simple:**
-1. **Make the browser predictable (`#13077`)** — lock in a normative, interoperable baseline for `srcset` selection.
-2. **Give the knobs to the website (`#13069`, `#12248`, `#11428`, `#12565`)** — empower the site owner (who knows the content and can A/B test business and UX impact) to control pixel density, 2D `object-fit` sizing, zoom upgrading, and bitmap inspection.
+1. **Standardize the browser baseline (`#13077`)** — define source selection (including reusing already-loaded higher-resolution sources) normatively for interoperability.
+2. **Give the knobs to the website (`#13069`, `#12248`, `#11428`, `#12565`)** — empower the site owner (who knows the content and can measure UX and business impact) to control pixel density, 2D `object-fit` sizing, zoom upgrading, and bitmap inspection.
 
 ---
 
@@ -53,11 +53,11 @@ Today, the only workaround is to **lie about layout width in `sizes`** (e.g., wr
 ### 3. Blurry images when users pinch-zoom or scale ([#11428](https://github.com/whatwg/html/issues/11428))
 When a user pinch-zooms into a product photo, map, or comic strip—or when a site scales an image with CSS `transform: scale(2)`—the CSS layout width does not change. Even when high-resolution candidates are right there in `srcset`, `sizes="auto"` never upgrades the image, leaving the user staring at a blurry bitmap.
 
-### 4. Unpredictable "implementation-defined" spec baseline ([#13077](https://github.com/whatwg/html/issues/13077))
+### 4. Unnecessary "implementation-defined" spec baseline ([#13077](https://github.com/whatwg/html/issues/13077))
 The HTML Standard still says:
 > *"In an implementation-defined manner, choose one image source..."*
 
-Even though Blink, Gecko, and WebKit now all implement the exact same rule (sort ascending by density and pick the first candidate `>= targetDensity`), leaving the spec "implementation-defined" prevents sites from relying on deterministic behavior when tuning their `srcset` breakpoints and density knobs, and blocks normative Web Platform Tests (WPT).
+Today, Blink, Gecko, and WebKit all use the same baseline rule (sort ascending by density and pick the first candidate `>= targetDensity`), and Chrome's optimization to keep an already-loaded higher-resolution source rather than fetching a lower-resolution one can be specified normatively. Leaving the entire selection step "implementation-defined" blocks normative Web Platform Tests (WPT) and makes it harder for sites to rely on consistent behavior when tuning their `srcset` breakpoints and density knobs.
 
 ### 5. Blindfolds on script-driven zoom and inspection ([#12565](https://github.com/whatwg/html/issues/12565))
 When a site uses `w` descriptors, `img.naturalWidth` and `img.naturalHeight` do **not** return the loaded bitmap's pixel dimensions—they return the density-adjusted CSS size (`pixelWidth / density`). With `sizes="auto"`, `naturalWidth` simply echoes the element's CSS layout width!
@@ -84,15 +84,15 @@ Browser Responsibility (Interop)          Website Responsibility (Business & UX 
                                             Read decodedWidth / decodedHeight for RUM & zoom
 ```
 
-### 1. Lock in Normative Source Selection ([#13077](https://github.com/whatwg/html/issues/13077))
-Replace *"In an implementation-defined manner, choose one image source"* with the deterministic algorithm all three engines already ship:
+### 1. Define Source Selection Normatively ([#13077](https://github.com/whatwg/html/issues/13077))
+Replace *"In an implementation-defined manner, choose one image source"* with a normative algorithm covering both baseline density selection and already-loaded resource reuse:
 1. Compute `targetDensity = effectiveDevicePixelRatio * authorDensityMultiplier`.
 2. Sort candidates in ascending order of resolved density (`w / sourceSize` or `x` descriptor).
 3. Select the **first candidate** with `density >= targetDensity`, or the **largest candidate** if none reaches `targetDensity`.
+4. **Reuse already-loaded / cached higher-resolution sources**: If a candidate with a higher density than the newly selected candidate is already loaded (or available in the local cache), continue using that higher-resolution source instead of initiating a network fetch for a lower-resolution candidate.
 
-**Scoped UA exceptions:**
-- **User & OS settings**: User agents may adjust `targetDensity` for explicit user preferences (e.g., browser/OS Data Saver mode or privacy/anti-fingerprinting modes), rather than opaque, unannounced heuristics.
-- **Cache upgrade**: If a higher-resolution candidate is already in the HTTP cache, the UA may use it instead of making a new network request for a smaller one.
+**Scoped UA flexibility:**
+- **User & OS settings**: User agents may adjust `targetDensity` for explicit user preferences (e.g., browser/OS Data Saver mode or privacy/anti-fingerprinting modes).
 
 ### 2. Give Websites a Target Density Knob ([#13069](https://github.com/whatwg/html/issues/13069))
 Let authors explicitly tune the sharpness-vs-bandwidth trade-off per image without lying in `sizes`:
@@ -173,8 +173,8 @@ img.decodedHeight; // 900  (true bitmap pixel height!)
 
 ## Alternatives Considered
 
-### Keep relying on User Agent heuristics
-We could leave selection implementation-defined and hope browsers invent smarter bandwidth-saving heuristics. History showed this does not work: browsers lack per-image product context, causing global heuristics to blur important images while still over-fetching unimportant ones.
+### Keep selection entirely implementation-defined
+We could leave selection implementation-defined and rely solely on UA heuristics. However, browsers do not have per-image product context to know which images can tolerate lower density and which require extra sharpness, while useful UA optimizations like keeping an already-loaded higher-resolution image can be standardized for all engines.
 
 ### Keep lying in `sizes` to control density
 Authors currently write `sizes="50vw"` on a `100vw` image to save bandwidth, or `sizes="200vw"` to force sharpness. This is incompatible with `sizes="auto"`, breaks `naturalWidth`, and becomes unmanageable when combined with 2D `object-fit`.
