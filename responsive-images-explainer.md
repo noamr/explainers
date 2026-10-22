@@ -24,7 +24,7 @@ A decade of production experience has clarified where browser behavior should be
 - **User Agents are designed for interoperability, while websites are best suited to measure context-specific business trade-offs.** A browser cannot know whether a given `<img>` is a conversion-critical product photo (where blurriness hurts sales), an interactive hero that will scale up on click, or the 40th thumbnail in a scrollable feed (where saving 45% of bytes improves LCP with negligible quality loss).
 - **Browser selection has converged and can be standardized.** Chrome retired its geometric-mean density rounding and `Save-Data` clamping experiments in late 2024, meaning WebKit, Gecko, and Blink now all use the same baseline selection rule (`first candidate >= targetDensity`). Chrome also retains a useful optimization to avoid downloading a lower-resolution source when a higher-resolution candidate is already loaded/cached—behavior that can be **standardized directly** rather than leaving the selection algorithm implementation-defined.
 
-**The theme of this proposal is simple:**
+**The theme of this proposal:**
 1. **Standardize the browser baseline (`#13077`)** — define source selection (including reusing already-loaded higher-resolution sources) normatively for interoperability.
 2. **Give the knobs to the website (`#13069`, `#12248`, `#11428`, `#12565`)** — empower the site owner (who knows the content and can A/B test UX and business impact) to control target density, 2D `object-fit` sizing (`cover`, `contain`, `scale-down`, `none`), and true pixel inspection.
 
@@ -65,7 +65,7 @@ The HTML Standard still states:
 Today, WebKit, Gecko, and Blink all implement the same baseline rule (`first candidate >= targetDensity`), and Chrome's optimization to keep an already-loaded higher-resolution candidate rather than re-fetching a smaller one can be standardized. Leaving the entire selection step "implementation-defined" blocks normative Web Platform Tests (WPT) and prevents authors from having a guaranteed baseline for new knobs.
 
 ### 5. Blindfolds on true pixel dimensions ([#12565](https://github.com/whatwg/html/issues/12565), [PR #13046](https://github.com/whatwg/html/pull/13046))
-Because `w` descriptors divide `naturalWidth` by `density` (and with [PR #13046](https://github.com/whatwg/html/pull/13046) `naturalWidth` always equals `sourceSize`), under `sizes="auto"` `img.naturalWidth` simply echoes the element's CSS layout width (`img.clientWidth`)!
+Because `w` descriptors divide `naturalWidth` by `density` (and with [PR #13046](https://github.com/whatwg/html/pull/13046) `naturalWidth` always equals `sourceSize`), under `sizes="auto"`, `img.naturalWidth` echoes the element's CSS layout width (`img.clientWidth`).
 
 As a result, websites cannot read the true pixel dimensions of the bitmap the browser selected:
 - **RUM / performance telemetry** cannot measure whether pages are over-fetching (wasting bandwidth) or under-fetching (showing blurry images) in production.
