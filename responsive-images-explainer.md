@@ -190,9 +190,10 @@ Client Hints require server-side negotiation, CDN `Vary` configuration, and extr
 
 ## Stakeholder Feedback / Signals
 
-- **Normative selection ([#13077](https://github.com/whatwg/html/issues/13077))**: Positive discussion across Blink (`@noamr`, `@pdr`) and WebKit (`@annevk`) noting that all three engines now use the same baseline rule.
-- **2D `sizes="auto"`, `h` descriptors, & `object-fit` ([#12248](https://github.com/whatwg/html/issues/12248), [#11428](https://github.com/whatwg/html/issues/11428), [PR #13053](https://github.com/whatwg/html/pull/13053))**: Active collaboration between Gecko (`@zcorpan`), Blink (`@noamr`), and web developers (`@austinh`, Airbnb).
-- **Density control ([#13069](https://github.com/whatwg/html/issues/13069))**: Strong production motivation and real-world data shared by Airbnb (`@austinh`) and Cloudinary (`@eeeps`).
+- **Normative selection**: [whatwg/html#13077](https://github.com/whatwg/html/issues/13077)
+- **2D `sizes="auto"`, `h` descriptors, & `object-fit`**: [whatwg/html#12248](https://github.com/whatwg/html/issues/12248), [whatwg/html#11428](https://github.com/whatwg/html/issues/11428), [whatwg/html#13053](https://github.com/whatwg/html/pull/13053)
+- **Density control**: [whatwg/html#13069](https://github.com/whatwg/html/issues/13069)
+- **True intrinsic dimensions**: [whatwg/html#12565](https://github.com/whatwg/html/issues/12565), [whatwg/html#13046](https://github.com/whatwg/html/pull/13046)
 
 ---
 
