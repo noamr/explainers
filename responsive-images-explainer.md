@@ -173,6 +173,9 @@ Authors currently write `sizes="50vw"` on a `100vw` image (which breaks `sizes="
 ### Change `naturalWidth` directly instead of adding `resourceWidth`
 Changing `naturalWidth` to return raw file pixels for `w`-descriptor images would break existing web pages that rely on `naturalWidth` reflecting the density-corrected CSS size (including [PR #13046](https://github.com/whatwg/html/pull/13046)). Adding `resourceWidth` / `resourceHeight` preserves full backward compatibility.
 
+### Use `(await createImageBitmap(img)).width` instead of `resourceWidth`
+`createImageBitmap(img)` is asynchronous, allocates a duplicate decoded bitmap in memory, and **throws a `SecurityError` on cross-origin `no-cors` images** (which is how almost all CDN images are served), whereas `naturalWidth` and `resourceWidth` work synchronously on all `<img>` elements.
+
 ### Server-side Client Hints (`Sec-CH-DPR` / `Sec-CH-Width`)
 Client Hints require server-side negotiation, CDN `Vary` configuration, and extra policy headers. Declarative client-side `srcset` knobs work on any static host or CDN and compose directly with `sizes="auto"`.
 

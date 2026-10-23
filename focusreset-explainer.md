@@ -18,9 +18,9 @@
 When the currently focused element (or an ancestor containing it) is removed from the DOM, the browser synchronously resets focus to the viewport (`document.body` / `document.documentElement`) via the HTML Standard's [node-remove focus fixup rule](https://html.spec.whatwg.org/multipage/infrastructure.html#node-remove-focus-fixup)—**without firing `blur` or `focusout`**.
 
 When an application or component library does not realize focus was reset:
-- **Users lose their place on the page**: Keyboard focus silently drops to `document.body`, forcing users to `Tab` through the entire header and navigation bar again.
-- **Focus escapes modal dialogs**: Removing a focused button inside a modal (e.g., "Next step") drops focus to `document.body`, letting the next `Tab` press escape into background content.
-- **Assistive technologies lose context**: Screen-reader and keyboard-navigation users lose their active cursor without warning.
+- **Roving-`tabindex` widgets, shortcuts, and focus traps break**: Although browsers preserve the *Sequential Focus Navigation Starting Point* (so pressing `Tab` still advances from the removed node's former position), `document.activeElement` silently drops to `document.body`—breaking arrow-key / roving-`tabindex` components, `Escape` / shortcut handlers, and focus-trap checks (`trap.contains(document.activeElement)`).
+- **Focus escapes modal dialogs**: Removing a focused button inside a modal (e.g., "Next step") drops `activeElement` to `document.body`, breaking modal focus management.
+- **Assistive technologies lose context ([w3c/aria#2920](https://github.com/w3c/aria/issues/2920))**: Screen-reader and keyboard-navigation users lose their active element without an event for component authors to restore it.
 
 ### Current Workarounds Are Expensive and Fragile
 
@@ -151,9 +151,18 @@ In HTML's [focus update steps](https://html.spec.whatwg.org/multipage/interactio
 - **Cross-origin `<iframe>`s**: Isolated per agent and per `Document`.
 
 ### Interaction with other features
-- **`moveBefore()`**: Preserves focus and does **not** fire `focusreset`.
+- **`moveBefore()`**: Preserves focus and does **not** fire `focusreset` (unless moved into an `inert` or hidden subtree, which resets focus).
 - **All DOM removal APIs**: Works across `remove()`, `removeChild()`, `replaceChildren()`, `innerHTML = ""`, shadow host removal, etc.
-- **Non-removal fixups (`disabled`, `hidden`, `display: none`, `inert`) & Navigation API `focusReset`**: Already run focusing steps and fire `blur` / `focusout`, so they do not fire `focusreset`.
+- **Non-removal fixups (`disabled`, `hidden`, `display: none`, `inert`) & Navigation API `focusReset`**: Already run focusing steps and fire `blur` / `focusout`, so they do not currently fire `focusreset` (open question below whether `focusreset` should also fire on style/attribute-based focus fixups).
+- **Migration path for deprecating Blink's synchronous `blur` ([whatwg/html#12842](https://github.com/whatwg/html/issues/12842))**: Major UI libraries (`Radix`, `MUI`, `focus-trap`) already maintain fallback paths for Gecko and WebKit; shipping `focusreset` gives them a clean standard primitive so Blink can deprecate its legacy synchronous `blur` on removal.
+
+---
+
+## Open Questions
+
+1. **Microtask timing vs. rendering timing**: Firing `focusreset` in the `MutationObserver` microtask keeps it immediately consistent with `document.activeElement` and handles removals during `requestAnimationFrame` / `ResizeObserver`. Conversely, firing during *update the rendering* would give asynchronous framework post-commit effects (`useEffect`, `LitElement.updated`) time to restore focus before `focusreset` fires.
+2. **Should `focusreset` also fire on style/attribute-based focus fixup (`display: none`, `hidden`, `inert`, `disabled`)?**: Those cases already fire `blur` and `focusout` after layout, but firing `focusreset` whenever the Focus Fixup Rule resets focus to the viewport would let focus traps handle all involuntary focus resets with a single listener.
+3. **`Document`-only vs. `ShadowRoot`**: Is firing on `Document` (paired with existing `focusin`/`focusout` tracking) sufficient, or should `ShadowRoot` also receive `focusreset` when an internal shadow node is removed?
 
 ---
 
