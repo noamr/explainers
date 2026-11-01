@@ -58,27 +58,41 @@ Because the platform lacks a unified signal for unhandled focus resets—and fir
 
 ## Proposed Solution: Bubbling `focusreset` Event After Rendering Focus Fixup
 
-Whenever **the platform moves focus to the viewport** because the focused element was removed or ceased to be focusable (even in cases where `blur` and `focusout` already fired), the `Document` records a **pending `focusreset` target**:
-- If the element is still connected (e.g., `disabled`, `hidden`, `inert`, `display: none`), the target is **that element itself**.
-- If the element (or an ancestor) was removed from the DOM, the target is **its nearest surviving connected ancestor** (`Element`, `ShadowRoot`, or `Document`)—walking further up to the next parent if that surviving ancestor is also removed before rendering.
+Whenever **the platform moves focus to the viewport** because the focused element was removed or ceased to be focusable (even in cases where `blur` and `focusout` already fired), the `Document` records:
+- a **pending `focusreset` target**:
+  - if the element is still connected (e.g., `disabled`, `hidden`, `inert`, `display: none`), **that element itself**;
+  - if the element (or an ancestor) was removed from the DOM, **its nearest surviving connected ancestor** (`Element`, `ShadowRoot`, or `Document`)—walking further up to the next parent if that surviving ancestor is also removed before rendering; and
+- a **pending `focusreset` related target**: the `Element` that lost focus (retained at most until the next rendering turn, and retargeted across shadow boundaries following `focusout` encapsulation rules so closed Shadow DOM internals are never exposed).
 
 During [update the rendering](https://html.spec.whatwg.org/multipage/webappapis.html#update-the-rendering), **immediately after the [focus fixup rule](https://html.spec.whatwg.org/multipage/webappapis.html#focus-fixup-rule) step**, if:
 1. focus has **not** moved to another focusable area in the meantime (which cancels the pending `focusreset`), and
 2. the document still **has focus** ([has focus steps](https://html.spec.whatwg.org/multipage/interaction.html#has-focus-steps)),
 
-the user agent fires an `Event` named `focusreset` (`bubbles: true`, `composed: true`, `cancelable: false`) at the pending target.
+the user agent fires a `FocusResetEvent` named `focusreset` (`bubbles: true`, `composed: true`, `cancelable: false`) at the pending target, with `relatedTarget` exposing the element that lost focus (retargeted against `currentTarget`).
 
 ```webidl
+[Exposed=Window]
+interface FocusResetEvent : Event {
+  constructor(DOMString type, optional FocusResetEventInit eventInitDict = {});
+  readonly attribute Element? relatedTarget;
+};
+
+dictionary FocusResetEventInit : EventInit {
+  Element? relatedTarget = null;
+};
+
 partial interface mixin GlobalEventHandlers {
   attribute EventHandler onfocusreset;
 };
 ```
 
 ```js
-dialog.addEventListener("focusreset", () => {
+dialog.addEventListener("focusreset", (e) => {
   // Focus inside `dialog` was reset to the viewport (via removal, disabled,
   // hidden, display:none, inert, or inside a child ShadowRoot) and nothing
-  // else claimed focus before rendering:
+  // else claimed focus before rendering.
+  // `e.target` is the surviving ancestor; `e.relatedTarget` is the element
+  // that lost focus (retargeted across shadow boundaries):
   fallbackElement.focus();
 });
 ```
@@ -124,13 +138,11 @@ class TodoList extends HTMLElement {
 If a delete handler or framework post-commit effect (`useEffect`, `LitElement.updated`, `requestAnimationFrame`) runs `undoButton.focus()` before rendering, that focus transfer cancels the pending `focusreset` automatically.
 
 ### 3. Restoring focus across partial DOM updates
-Because `focusreset` bubbles up to `Document`, page-level coordinators can also observe `event.target` (the surviving container, retargeted across shadow boundaries) or restore focus by ID before paint:
+Because `focusreset` bubbles up to `Document` and exposes the removed or unfocused element on `event.relatedTarget` (retargeted across shadow boundaries), page-level coordinators can restore focus to a replacement element matching the previous ID or attributes with zero `focusin` bookkeeping:
 
 ```js
-let lastFocusedId = null;
-document.addEventListener("focusin", (e) => { lastFocusedId = e.target.id || null; });
-document.addEventListener("focusreset", () => {
-  if (lastFocusedId) document.getElementById(lastFocusedId)?.focus();
+document.addEventListener("focusreset", (e) => {
+  if (e.relatedTarget?.id) document.getElementById(e.relatedTarget.id)?.focus();
 });
 ```
 
@@ -140,7 +152,17 @@ document.addEventListener("focusreset", () => {
 
 All required specification hooks (`removing steps`, `focus update steps`, and `update the rendering`) already exist in the HTML Standard—no changes to the DOM Standard are required.
 
-Each `Document` has an associated **pending `focusreset` target** (a `Node` or `null`, initially `null`). Whenever non-null, it is **always [connected](https://dom.spec.whatwg.org/#connected)** (`target`'s shadow-including root is `Document`), so detached DOM subtrees are never retained in memory.
+Each `Document` has:
+- an associated **pending `focusreset` target** (a `Node` or `null`, initially `null`)—whenever non-null, it is **always [connected](https://dom.spec.whatwg.org/#connected)** (`target`'s shadow-including root is `Document`); and
+- an associated **pending `focusreset` related target** (an `Element` or `null`, initially `null`)—retained at most until the next rendering turn (or until cancelled by another focus change), and cleared immediately on dispatch.
+
+To **retarget a `focusreset` related target** *related* (with surviving `Node`-or-null *contextTarget*) against *destination*:
+1. Let *candidate* be the result of [retargeting](https://dom.spec.whatwg.org/#retarget) *related* against *destination*.
+2. If *candidate* is a node, *candidate* is not [connected](https://dom.spec.whatwg.org/#connected), *contextTarget* is non-null, *contextTarget*'s root is a shadow root, and (*destination* is not a node or *contextTarget*'s root is not a shadow-including inclusive ancestor of *destination*):
+   1. Return the result of [retargeting](https://dom.spec.whatwg.org/#retarget) *contextTarget*'s root's host against *destination*.
+3. Return *candidate*.
+
+*(Why this helper is needed: once `shadowBtn.remove()` detaches `shadowBtn` from its `ShadowRoot`, `shadowBtn`'s tree root is `shadowBtn` itself rather than the `ShadowRoot`, so plain DOM `retarget(shadowBtn, destination)` would stop early instead of walking out to `shadowRoot.host`. Using *contextTarget* restores the exact `focusout` shadow-retargeting chain across arbitrary open/closed shadow boundaries.)*
 
 ### 1. HTML `removing steps(removedNode, isSubtreeRoot, oldAncestor)`
 
@@ -154,9 +176,12 @@ Replacing HTML's `#node-remove-focus-fixup` step with a subtree-root check (`isS
    2. If *focusedAnchor* is non-null and *removedNode* is a [shadow-including inclusive ancestor](https://dom.spec.whatwg.org/#concept-shadow-including-inclusive-ancestor) of *focusedAnchor*:
       1. Set *document*'s focused area to *document*'s viewport.
       2. Set *document*'s relevant global object's navigation API's focus changed during ongoing navigation to false.
-      3. If the [has focus steps](https://html.spec.whatwg.org/multipage/interaction.html#has-focus-steps) given *document* return true, then set *document*'s **pending `focusreset` target** to *oldAncestor*.
+      3. If the [has focus steps](https://html.spec.whatwg.org/multipage/interaction.html#has-focus-steps) given *document* return true:
+         1. Set *document*'s **pending `focusreset` target** to *oldAncestor*.
+         2. Set *document*'s **pending `focusreset` related target** to *focusedAnchor* if *focusedAnchor* is an `Element`; otherwise null.
    3. Otherwise, if *document*'s **pending `focusreset` target** is non-null and *removedNode* is a [shadow-including inclusive ancestor](https://dom.spec.whatwg.org/#concept-shadow-including-inclusive-ancestor) of *document*'s **pending `focusreset` target**:
-      1. Set *document*'s **pending `focusreset` target** to *oldAncestor*.
+      1. If *document*'s **pending `focusreset` related target** is non-null, set *document*'s **pending `focusreset` related target** to the result of **retargeting a `focusreset` related target** given *document*'s **pending `focusreset` related target**, *document*'s **pending `focusreset` target**, and *oldAncestor*.
+      2. Set *document*'s **pending `focusreset` target** to *oldAncestor*.
 
 Why crafting `removing steps` at `isSubtreeRoot = true` matters:
 - **Immune to synchronous re-entrancy during descendant teardown**: Waiting until DOM's descendant loop (`isSubtreeRoot = false`) visits a deep focused node would run *after* earlier sibling `<iframe>`s destroy their child navigables (whose legacy synchronous `pagehide`/`unload` handlers could detach `oldAncestor` before the focused descendant is visited). Running at `isSubtreeRoot = true` records `oldAncestor` before any descendant `removing steps` run; if a legacy `pagehide` handler then removes `oldAncestor`, that nested `remove()`'s own `isSubtreeRoot = true` step advances **pending `focusreset` target** to `oldAncestor`'s surviving parent.
@@ -168,7 +193,7 @@ Why crafting `removing steps` at `isSubtreeRoot = true` matters:
 
 In HTML's [focus update steps](https://html.spec.whatwg.org/multipage/interaction.html#focus-update-steps) `(old chain, new chain, new focus target)`:
 - Because [focusing steps](https://html.spec.whatwg.org/multipage/interaction.html#focusing-steps) bail out early before *focus update steps* when a candidate cannot be focused, reaching *focus update steps* guarantees focus actually changed.
-- After popping matching trailing entries from *old chain* and *new chain*: if *new focus target* is non-null and is **not** a `Document`'s viewport, then for each `Document` *doc* in *old chain* or *new chain*, set *doc*'s **pending `focusreset` target** to `null`.
+- After popping matching trailing entries from *old chain* and *new chain*: if *new focus target* is non-null and is **not** a `Document`'s viewport, then for each `Document` *doc* in *old chain* or *new chain*, set *doc*'s **pending `focusreset` target** to `null` and *doc*'s **pending `focusreset` related target** to `null`.
 - **What cancels `focusreset`**: `replacement.focus()`, `dialog.showModal()`, `dialog.show()`, `popover.showPopover()` (with `autofocus`), or user focus changes before rendering.
 - **What does NOT cancel `focusreset`**: No-op calls (`removedElement.focus()`, `disabledElement.focus()`, `inertElement.focus()`, `hiddenElement.focus()`, or `document.body.blur()`), and viewport resets performed by the platform itself.
 
@@ -178,33 +203,36 @@ In HTML's [update the rendering](https://html.spec.whatwg.org/multipage/webappap
 
 1. **In the [focus fixup rule](https://html.spec.whatwg.org/multipage/webappapis.html#focus-fixup-rule) step (`#focus-fixup-rule`):** For each *doc* of *docs*, if the focused area of *doc* is not a focusable area (`disabled`, `hidden`, `inert`, `display: none`, `visibility: hidden`, etc.):
    1. Let *anchor* be *doc*'s focused area's [DOM anchor](https://html.spec.whatwg.org/multipage/interaction.html#dom-anchor).
-   2. If the *has focus steps* given *doc* return true, set *doc*'s **pending `focusreset` target** to *anchor* if *anchor* is [connected](https://dom.spec.whatwg.org/#connected); otherwise *doc*.
+   2. If the *has focus steps* given *doc* return true:
+      1. Set *doc*'s **pending `focusreset` target** to *anchor* if *anchor* is [connected](https://dom.spec.whatwg.org/#connected); otherwise *doc*.
+      2. Set *doc*'s **pending `focusreset` related target** to *anchor* if *anchor* is an `Element`; otherwise null.
    3. Run the focusing steps for *doc*'s viewport (firing `blur` and `focusout` as today), and set *doc*'s relevant global object's navigation API's focus changed during ongoing navigation to false.
-   *(If a synchronous `blur` or `focusout` listener moves focus to another element, § 2 clears **pending `focusreset` target** to `null`; if that listener removes *anchor*, § 1.2.3 advances **pending `focusreset` target** to *anchor*'s surviving ancestor.)*
+   *(If a synchronous `blur` or `focusout` listener moves focus to another element, § 2 clears **pending `focusreset` target** and **pending `focusreset` related target** to `null`; if that listener removes *anchor*, § 1.2.3 advances **pending `focusreset` target** to *anchor*'s surviving ancestor.)*
 
 2. **Immediately after `#focus-fixup-rule`:** For each *doc* of *docs*:
-   1. Let *target* be *doc*'s **pending `focusreset` target**.
-   2. Set *doc*'s **pending `focusreset` target** to `null`.
+   1. Let *target* be *doc*'s **pending `focusreset` target**, and let *related* be *doc*'s **pending `focusreset` related target**.
+   2. Set *doc*'s **pending `focusreset` target** to `null` and *doc*'s **pending `focusreset` related target** to `null`.
    3. If *target* is non-null and the *has focus steps* given *doc* return true:
       1. Assert: *target* is [connected](https://dom.spec.whatwg.org/#connected) and *target*'s node document is *doc*.
-      2. Fire an event named `focusreset` at *target*, with `bubbles` set to `true` and `composed` set to `true`.
+      2. Fire an event named `focusreset` at *target*, using `FocusResetEvent`, with `bubbles` set to `true`, `composed` set to `true`, internal `relatedTarget` set to *related*, and internal `contextTarget` set to *target* (where `FocusResetEvent.prototype.relatedTarget`'s getter returns the result of **retargeting a `focusreset` related target** given internal `relatedTarget`, internal `contextTarget`, and `this.currentTarget`).
 
 Why this timing works across both frameworks and low-level DOM code:
 - **Framework-friendly**: Synchronous handlers, microtasks (`LitElement.updated`, `Promise.then`), post-commit hooks (`useEffect`), `requestAnimationFrame` callbacks, and `ResizeObserver` callbacks all get a chance to call `nextElement.focus()` and cancel `focusreset` before it fires.
 - **Pre-paint (including `rAF` / `ResizeObserver` removals)**: Because the focus fixup step runs *after* `requestAnimationFrame` and `ResizeObserver`, focus losses triggered inside `rAF` or `ResizeObserver` still fire `focusreset` before the frame is painted.
-- **Coalesced & loop-safe**: Multiple focus/reset cycles in the same frame coalesce to a single `focusreset`, and clearing **pending `focusreset` target** before dispatch prevents infinite recursion within a single rendering turn.
+- **Coalesced, loop-safe, and single-frame lifetime**: Multiple focus/reset cycles in the same frame coalesce to a single `focusreset`, clearing both pending fields before dispatch prevents infinite recursion, and any detached `relatedTarget` is held for at most one frame.
 
 ### 4. Shadow DOM Encapsulation & Propagation
 
 Because `focusreset` has **`bubbles: true` and `composed: true`** (matching `focusin` and `focusout`):
-- **Inside a `ShadowRoot`**: If an internal shadow element is removed or disabled, **pending `focusreset` target** is the surviving internal shadow node (or the `ShadowRoot` itself if a direct child of `ShadowRoot` was removed). Internal listeners on shadow ancestors or `this.shadowRoot` see the exact surviving shadow target and can repair roving focus internally.
-- **Across the shadow boundary**: Standard [DOM Event Retargeting](https://dom.spec.whatwg.org/#retarget) retargets `event.target` to `shadowRoot.host` as the event bubbles out into the light DOM—preserving closed Shadow DOM encapsulation while allowing outer `<dialog>` focus traps and `Document` listeners to catch unhandled resets.
-- **Shadow host also removed (`shadowBtn.remove(); host.remove();`)**: Per [DOM § 4.2.2 (`shadow-including descendant`)](https://dom.spec.whatwg.org/#concept-shadow-including-descendant), `ShadowRoot`'s tree root is itself (`ShadowRoot`) whose `host` is `host`, so `host` is a shadow-including inclusive ancestor of both internal shadow elements and `ShadowRoot` itself. Removing `host` therefore advances **pending `focusreset` target** out to `host`'s surviving light-DOM parent via the exact same § 1.2.3 step.
+- **Inside a `ShadowRoot`**: If an internal shadow element is removed or disabled, **pending `focusreset` target** is the surviving internal shadow node (or `ShadowRoot` itself) and `event.relatedTarget` is the exact internal shadow element that lost focus. Internal listeners on shadow ancestors or `this.shadowRoot` can inspect both and repair roving focus internally.
+- **Across the shadow boundary (`focusout` retargeting semantics)**: Standard [DOM Event Retargeting](https://dom.spec.whatwg.org/#retarget) retargets `event.target` to `shadowRoot.host` as the event bubbles out into the light DOM, and `FocusResetEvent.prototype.relatedTarget` likewise retargets to `shadowRoot.host`—preserving closed Shadow DOM encapsulation while allowing outer `<dialog>` focus traps and `Document` listeners to catch unhandled resets.
+- **Why `FocusResetEvent` (like HTML's `ToggleEvent` / `CommandEvent`) rather than `FocusEvent`**: Events that populate DOM `Event`'s internal `relatedTarget` slot (such as `FocusEvent`) trigger DOM `dispatch`'s shadow-boundary suppression rule (`Otherwise, if parent is relatedTarget, then set parent to null`), which stops propagation at `shadowRoot.host` whenever `target` and `relatedTarget` originate inside the same shadow tree. Using `FocusResetEvent` with getter-level retargeting (matching `CommandEvent.prototype.source` and `ToggleEvent.prototype.source`) lets `focusreset` compose all the way to `Document` while keeping `relatedTarget` encapsulated.
+- **Shadow host also removed (`shadowBtn.remove(); host.remove();`)**: Per [DOM § 4.2.2 (`shadow-including descendant`)](https://dom.spec.whatwg.org/#concept-shadow-including-descendant), `host` is a shadow-including inclusive ancestor of both internal shadow elements and `ShadowRoot` itself. Removing `host` advances **pending `focusreset` target** to `host`'s surviving light-DOM parent and retargets **pending `focusreset` related target** from `shadowBtn` to `host` via § 1.2.3—so light-DOM listeners see `event.relatedTarget === host` without leaking `shadowBtn`.
 - **Inner component handled vs. outer trap**: If an inner shadow listener calls `internalFallback.focus()`, then by the time outer light-DOM bubble listeners run, `document.activeElement` is already `host` (no longer `document.body`), or the inner component can call `event.stopPropagation()`.
 
 ### 5. Nested Documents (`<iframe>`s) and Other Platform Interactions
 
-- **Nested `<iframe>`s**: `has focus steps` are checked both when recording and when dispatching `focusreset`. Background tabs and unfocused frames do not fire `focusreset`. If `iframeButton.remove(); iframe.remove();` run in the same frame, the detached child `Document` no longer has focus at rendering time, so `focusreset` fires **only in the parent `Document`** (at `iframe`'s surviving parent).
+- **Nested `<iframe>`s**: `has focus steps` are checked both when recording and when dispatching `focusreset`. Background tabs and unfocused frames do not fire `focusreset`. If `iframeButton.remove(); iframe.remove();` run in the same frame, the detached child `Document` no longer has focus at rendering time, so `focusreset` fires **only in the parent `Document`** (at `iframe`'s surviving parent, with `event.relatedTarget === iframe`).
 - **Reparenting (`appendChild`) vs. `moveBefore()`**:
   - Reparenting a pending target (`pool.appendChild(row)`) runs `remove(row)` during adoption first, advancing **pending `focusreset` target** to `row`'s original parent where focus was lost (avoiding firing inside an off-screen recycling pool).
   - Moving an ancestor or pending target via `moveBefore()` does not run `remove()` and preserves its `connected` tree root, keeping **pending `focusreset` target** on that moved container; moving the focused element itself via `moveBefore()` preserves focus unless it lands in a hidden or `inert` subtree, where `#focus-fixup-rule` resets focus to the viewport and triggers `focusreset`.
@@ -219,7 +247,7 @@ Because `focusreset` has **`bubbles: true` and `composed: true`** (matching `foc
 - **Firing in the `MutationObserver` microtask instead of *update the rendering***: Fires prematurely before framework post-commit hooks (`useEffect`, `requestAnimationFrame`) can move focus to a replacement element, and cannot unify DOM removal with layout-dependent focus fixups (`display: none`, `visibility: hidden`). Running right after *update the rendering*'s focus fixup step still runs *after* `rAF` and `ResizeObserver` and *before* paint.
 - **Firing `blur` / `focusout` synchronously on removal**: Unsafe—runs script mid-removal on partially updated DOM trees.
 - **Firing `blur` / `focusout` asynchronously on the nearest surviving ancestor**: Semantically inaccurate on removal (the ancestor itself was never focused), and `focusout` cannot distinguish *"focus dropped to the viewport"* from ordinary focus movement into closed Shadow DOM or non-focusable click targets.
-- **Exposing the removed element (`relatedTarget`)**: Would retain detached DOM subtrees in memory until rendering and leak closed Shadow DOM nodes across shadow boundaries.
+- **Reusing `FocusEvent` directly**: `FocusEvent` binds to DOM `Event`'s internal `relatedTarget` slot, which triggers DOM `dispatch`'s shadow-boundary suppression rule (`parent === relatedTarget`) and would swallow `focusreset` at `shadowRoot.host` whenever focus was lost inside a shadow tree; in addition, plain DOM `retarget()` does not retarget a node already detached from its `ShadowRoot`. Defining `FocusResetEvent` with getter retargeting (like `CommandEvent` and `ToggleEvent`) avoids both issues.
 - **Firing unconditionally even when another element gained focus**: Would cause fallback handlers and focus traps to overwrite intentional `nextElement.focus()` calls.
 
 ---
@@ -228,7 +256,7 @@ Because `focusreset` has **`bubbles: true` and `composed: true`** (matching `foc
 
 `focusreset` exposes no new cross-origin or encapsulated information:
 - It fires only within a focused `Document` when the platform resets focus to the viewport—state already observable via `document.activeElement`, `MutationObserver`, and `document.hasFocus()`.
-- Walking `pending focusreset target` up on DOM removal guarantees that detached nodes are never retained or exposed, and `composed: true` uses standard DOM retargeting so closed Shadow DOM internals are never leaked to outer trees.
+- Both `event.target` and `event.relatedTarget` retarget across shadow boundaries (even when `relatedTarget` was detached from a `ShadowRoot` before dispatch), so closed Shadow DOM internals are never leaked to outer trees; any detached `relatedTarget` reference on `Document` is cleared on the next focus transfer or rendering turn (at most one frame).
 - Cross-origin `<iframe>`s remain isolated per `Document` and per agent, and BFCache / Private Browsing behave identically to normal browsing.
 
 ---
