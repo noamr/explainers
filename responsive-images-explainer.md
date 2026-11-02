@@ -28,6 +28,22 @@ A decade of production experience has clarified where browser behavior should be
 1. **Standardize the browser baseline (`#13077`)** — define the end-to-end source selection algorithm (including reusing already-loaded/cached higher-resolution sources) normatively for interoperability.
 2. **Give the knobs to the website (`#13069`, `#12248`, `#11428`, `#12565`)** — empower the site owner (who knows the content and can A/B test UX and business impact) to clamp target density via `mindensity` and `maxdensity`, handle 2D `object-fit` sizing (`cover`, `contain`, `scale-down`, `none`) with `h` descriptors, and inspect true intrinsic dimensions via `imageWidth`, `imageHeight`, and `imageAspectRatio`.
 
+### At a Glance
+
+```html
+<!-- 1. Density bounds (maxdensity="1.5") + 2. 2D object-fit sizing (w + h descriptors) -->
+<img id="card" loading="lazy" sizes="auto" maxdensity="1.5"
+     style="width: 300px; height: 300px; object-fit: cover"
+     srcset="card-400.jpg 400w 300h, card-600.jpg 600w 450h, card-1200.jpg 1200w 900h"
+     alt="4:3 listing photo">
+
+<script>
+  // 3. Inspect true unscaled resource dimensions & exact ratio (even with sizes="auto")
+  card.onload = () => console.log(card.imageWidth, card.imageHeight, card.imageAspectRatio);
+  // → 600, 450, 1.3333333333333333 (vs. naturalWidth === 400)
+</script>
+```
+
 ---
 
 ## User-Facing Problems: Blurry Images and Wasted Bandwidth
@@ -223,7 +239,17 @@ img.imageAspectRatio; // 1.7777777777777777 (exact 16 / 9 ratio; also works for 
 
 ### 4. Explicit Normative Source Selection Algorithm ([#13077](https://github.com/whatwg/html/issues/13077), [#13069](https://github.com/whatwg/html/issues/13069), [#12248](https://github.com/whatwg/html/issues/12248))
 
-Replace HTML's *"In an implementation-defined manner, choose one image source"* (and update *"create a source set"* / *"select an image source from a source set"*) with the following deterministic algorithm.
+Replace HTML's *"In an implementation-defined manner, choose one image source"* with a deterministic 6-step baseline across engines:
+
+1. **Declared aspect ratio (`c.ratio`):** Use `c.w / c.h` if both `w` and `h` descriptors are present; else fall back to `width / height` attributes on `<source>` or `<img>`; never inspect decoded dimensions of a previously loaded image (preventing oscillation loops).
+2. **Effective source width (`c.sourceWidth`):** Resolve `sizes="auto"` (using `el`'s CSS content box + `object-fit` against `c.ratio`) or explicit `sizes` (supporting both `1D` lengths and `cover/contain <W> <H>`).
+3. **Normalized density (`c.density`):** Compute `c.w / max(c.sourceWidth, 1e-9)` (or `c.x`, or `1.0`), deduplicating equal densities in markup order.
+4. **Target density (`targetDensity`):** Clamp `devicePixelRatio` with `maxdensity` and `mindensity` (`max(min(DPR, maxDensity), minDensity)`), allowing UAs to apply explicit user data-saver or privacy adjustments (`MAY`), while forbidding content-agnostic midpoint-rounding heuristics.
+5. **Preferred candidate (`preferredSource`):** Sort ascending by `c.density` and pick the **first** candidate with `c.density >= targetDensity` (or the highest-density candidate if none reaches `targetDensity`).
+6. **Local cache reuse (`MAY`):** If a sharper candidate (`c.density > preferredSource.density`) is already synchronously available in local cache/memory, reuse it instead of issuing a redundant network request.
+
+<details>
+<summary><strong>Full Normative Selection Algorithm & Worked Example</strong></summary>
 
 #### Inputs
 - `el`: the `HTMLImageElement`.
@@ -362,6 +388,8 @@ Suppose a listing card renders inside a `300px × 300px` square CSS content box 
 5. **Step 5 (`preferredSource`):** First candidate with `c.density >= 1.5` is **`card-600.jpg` (`1.5x`)** — sharp after the `4:3 → 1:1` crop (`600 × 450` vs `1200 × 900`, **saving 75% of pixels** compared to `3x`, while a `1x` desktop monitor has `targetDensity = min(1.0, 1.5) = 1.0` and picks `card-400.jpg` so it is never blurry after cropping!).
 6. **Step 6 (Cache reuse):** If `card-1200.jpg` was already downloaded earlier (e.g., from visiting the listing detail page), the browser **MAY** reuse `card-1200.jpg` from memory/cache with zero network traffic; otherwise it fetches `card-600.jpg`.
 
+</details>
+
 ---
 
 ## Alternatives Considered
@@ -410,6 +438,11 @@ Client Hints require server-side negotiation, CDN `Vary` configuration, and extr
 ---
 
 ## Security and Privacy Self-Review Questionnaire
+
+`imageWidth`, `imageHeight`, and `imageAspectRatio` expose only the unscaled intrinsic dimensions and aspect ratio of an *available* `<img>` resource (already observable by loading `img.currentSrc` without `w` descriptors), governed by the same cross-origin readiness rules as `naturalWidth` / `naturalHeight`. User data-saver and anti-fingerprinting adjustments apply *after* author `mindensity` / `maxdensity` clamping (Step 4.5), so user privacy preferences always take precedence.
+
+<details>
+<summary><strong>Full Security & Privacy Questionnaire Responses (2.1–2.19)</strong></summary>
 
 Per the [W3C Security and Privacy Self-Review Questionnaire](https://w3c.github.io/security-questionnaire/):
 
@@ -471,3 +504,5 @@ No.
 
 ### 2.19 What should this questionnaire have asked?
 Nothing additional.
+
+</details>
