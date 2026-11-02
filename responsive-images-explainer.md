@@ -1,4 +1,4 @@
-# Better Responsive Image Knobs
+# Responsive Image Fine-Tuning Knobs
 
 ## Authors:
 - Noam Rosenthal
@@ -9,6 +9,10 @@
 - [whatwg/html#12248 — `sizes="auto"` images shouldn't use concrete object width to select source](https://github.com/whatwg/html/issues/12248) ([PR #13053](https://github.com/whatwg/html/pull/13053))
 - [whatwg/html#11428 — Responsive images with `srcset` unexpectedly upscale when using `object-fit: none` or `scale-down`](https://github.com/whatwg/html/issues/11428)
 - [whatwg/html#12565 — No way to read an image's true intrinsic dimensions when `sizes="auto"` (or any `w`-descriptor `srcset`) is used](https://github.com/whatwg/html/issues/12565) ([PR #13046](https://github.com/whatwg/html/pull/13046))
+- [W3C TAG Design Review (#1301)](https://github.com/w3ctag/design-reviews/issues/1301)
+- [Mozilla Standards Position (#1477)](https://github.com/mozilla/standards-positions/issues/1477)
+- [WebKit Standards Position (#736)](https://github.com/WebKit/standards-positions/issues/736)
+- [ChromeStatus Entry (#5135400531263488)](https://chromestatus.com/feature/5135400531263488)
 
 ---
 
@@ -430,10 +434,15 @@ Client Hints require server-side negotiation, CDN `Vary` configuration, and extr
 
 ## Stakeholder Feedback / Signals
 
-- **Normative selection**: [whatwg/html#13077](https://github.com/whatwg/html/issues/13077)
-- **2D `sizes="auto"`, `h` descriptors, & `object-fit`**: [whatwg/html#12248](https://github.com/whatwg/html/issues/12248), [whatwg/html#11428](https://github.com/whatwg/html/issues/11428), [whatwg/html#13053](https://github.com/whatwg/html/pull/13053)
-- **Density bounds (`mindensity` / `maxdensity`)**: [whatwg/html#13069](https://github.com/whatwg/html/issues/13069)
-- **True intrinsic dimensions (`imageWidth` / `imageHeight` / `imageAspectRatio`)**: [whatwg/html#12565](https://github.com/whatwg/html/issues/12565), [whatwg/html#13046](https://github.com/whatwg/html/pull/13046)
+- **W3C TAG**: [w3ctag/design-reviews#1301](https://github.com/w3ctag/design-reviews/issues/1301)
+- **Chromium**: [ChromeStatus #5135400531263488](https://chromestatus.com/feature/5135400531263488) ([crbug.com/572724710](https://issues.chromium.org/issues/572724710))
+- **Gecko (Mozilla)**: [mozilla/standards-positions#1477](https://github.com/mozilla/standards-positions/issues/1477)
+- **WebKit (Apple)**: [WebKit/standards-positions#736](https://github.com/WebKit/standards-positions/issues/736)
+- **WHATWG HTML issues & PRs**:
+  - Normative selection: [whatwg/html#13077](https://github.com/whatwg/html/issues/13077)
+  - Density bounds (`mindensity` / `maxdensity`): [whatwg/html#13069](https://github.com/whatwg/html/issues/13069)
+  - 2D `sizes="auto"`, `h` descriptors, & `object-fit`: [whatwg/html#12248](https://github.com/whatwg/html/issues/12248), [whatwg/html#11428](https://github.com/whatwg/html/issues/11428), [whatwg/html#13053](https://github.com/whatwg/html/pull/13053)
+  - True intrinsic dimensions (`imageWidth` / `imageHeight` / `imageAspectRatio`): [whatwg/html#12565](https://github.com/whatwg/html/issues/12565), [whatwg/html#13046](https://github.com/whatwg/html/pull/13046)
 
 ---
 
