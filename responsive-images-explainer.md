@@ -108,7 +108,7 @@ Browser Responsibility (Interop)          Website Responsibility (Business & UX 
 
 ### 1. `mindensity` and `maxdensity` Attributes ([#13069](https://github.com/whatwg/html/issues/13069))
 
-Introduce two content attributes—`mindensity` and `maxdensity`—on `<img>` and `<source>`, parsed using HTML's rules for parsing positive floating-point numbers (`> 0`):
+Introduce two content attributes—`mindensity` and `maxdensity`—on `<img>` and `<source>`, parsed using HTML's [rules for parsing floating-point number values](https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-floating-point-number-values); values `<= 0` or invalid values are ignored (treated as unset):
 
 ```html
 <!-- Cap high-DPR phones at 1.5x (saves 75% pixels vs 3x), while 1x desktop stays at 1.0x -->
@@ -132,15 +132,17 @@ Introduce two content attributes—`mindensity` and `maxdensity`—on `<img>` an
 
 ```webidl
 partial interface HTMLImageElement {
-  [CEReactions, Reflect] attribute DOMString minDensity;
-  [CEReactions, Reflect] attribute DOMString maxDensity;
+  [CEReactions, Reflect] attribute double minDensity;
+  [CEReactions, Reflect] attribute double maxDensity;
 };
 
 partial interface HTMLSourceElement {
-  [CEReactions, Reflect] attribute DOMString minDensity;
-  [CEReactions, Reflect] attribute DOMString maxDensity;
+  [CEReactions, Reflect] attribute double minDensity;
+  [CEReactions, Reflect] attribute double maxDensity;
 };
 ```
+
+Both IDL attributes [reflect](https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#reflecting-content-attributes-in-idl-attributes) as `double` [*limited to numbers greater than zero*](https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#limited-to-numbers-greater-than-zero), with a default value of `0` meaning "unset". Setting a value `<= 0` is ignored, matching existing HTML reflection rules.
 
 **Key properties:**
 - **Clamps `targetDensity` without lying in `sizes` or `w` descriptors:** `sizes` and `w`/`h` descriptors stay 100% honest, preserving `img.naturalWidth`, 2D aspect-ratio math, and shared CDN URLs across components.
@@ -164,6 +166,7 @@ Allow an optional positive integer `<height-descriptor>` (`Nh`) alongside a widt
              card-1200.jpg 1200w 900h"
      alt="">
 ```
+- **`h` is already reserved for this.** HTML's srcset parser already parses `Nh` into *future-compat-h*. That value is reserved for future use: today it is a conformance error, the height is ignored, and a candidate with `w` is kept. So `400w 300h` already loads in every engine, falling back to width-only selection, and existing WPTs (`parse-a-srcset-attribute`) cover the parsing. This proposal puts the reserved descriptor to use and makes `Mw Nh` conforming; `Nh` without `w` remains an error.
 - When all candidates share the same aspect ratio as the `<img>` (or `<source>`) `width` and `height` attributes, lazy `sizes="auto"` images do not even need `h` descriptors—each candidate falls back to `width / height`.
 - When candidates have differing aspect ratios—or when `width`/`height` attributes are omitted—`w` + `h` provides each candidate's exact pre-fetch aspect ratio `r = w / h` directly to both layout and the speculative preload scanner.
 - **Zero infinite loops:** Candidate selection uses *only* declared markup hints (`w`/`h` descriptors or `width`/`height` attributes), never the decoded bitmap's intrinsic ratio. Loading an image never mutates its candidate aspect ratio or triggers a re-selection oscillation loop.
