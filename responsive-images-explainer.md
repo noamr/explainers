@@ -435,7 +435,11 @@ Client Hints require server-side negotiation, CDN `Vary` configuration, and extr
 ## Stakeholder Feedback / Signals
 
 - **W3C TAG**: [w3ctag/design-reviews#1301](https://github.com/w3ctag/design-reviews/issues/1301)
-- **Chromium**: [ChromeStatus #5135400531263488](https://chromestatus.com/feature/5135400531263488) ([crbug.com/572724710](https://issues.chromium.org/issues/572724710))
+- **Chromium**: [ChromeStatus #5135400531263488](https://chromestatus.com/feature/5135400531263488), umbrella [crbug.com/581018325](https://issues.chromium.org/issues/581018325)
+  - `mindensity` / `maxdensity`: [crbug.com/581045130](https://issues.chromium.org/issues/581045130)
+  - 2D `sizes`, `h` descriptors, & `object-fit`: [crbug.com/572724710](https://issues.chromium.org/issues/572724710)
+  - `imageWidth` / `imageHeight` / `imageAspectRatio`: [crbug.com/581090720](https://issues.chromium.org/issues/581090720)
+  - `sizes` determines `naturalWidth`: [crbug.com/571157134](https://issues.chromium.org/issues/571157134)
 - **Gecko (Mozilla)**: [mozilla/standards-positions#1477](https://github.com/mozilla/standards-positions/issues/1477)
 - **WebKit (Apple)**: [WebKit/standards-positions#736](https://github.com/WebKit/standards-positions/issues/736)
 - **WHATWG HTML issues & PRs**:
