@@ -11,7 +11,7 @@
 - [web-platform-tests/wpt#63595 — WPT PR](https://github.com/web-platform-tests/wpt/pull/63595)
 
 > [!NOTE]
-> **This explainer describes a proposed next revision**, which differs from the open spec PRs ([whatwg/html#13050](https://github.com/whatwg/html/pull/13050), [whatwg/dom#1512](https://github.com/whatwg/dom/pull/1512)) and their tests. Those PRs fire a plain `focusreset` event at the `Document`, in the mutation observer microtask, only on DOM removal, and only while the document has focus. This revision fires a bubbling `FocusResetEvent` at the nearest surviving ancestor, during *update the rendering*, for every platform focus reset (including `disabled`, `inert`, and `display: none`), and does not drop resets that happen while the document lacks system focus. The spec PRs will be updated once there is agreement on this direction in [whatwg/html#12842](https://github.com/whatwg/html/issues/12842).
+> **This explainer describes a proposed next revision**, which differs from the open spec PRs ([whatwg/html#13050](https://github.com/whatwg/html/pull/13050), [whatwg/dom#1512](https://github.com/whatwg/dom/pull/1512)) and their tests. Those PRs fire a plain `focusreset` event at the `Document`, in the mutation observer microtask, only on DOM removal, and only while the document has focus. This revision fires a bubbling, cancelable `FocusResetEvent` at the nearest surviving ancestor, during *update the rendering*, for every platform focus reset (including `disabled`, `inert`, and `display: none`). It records resets that happen while the document lacks system focus and fires them once the document has focus, and it stays out of the way of Navigation API focus resets. The spec PRs will be updated once there is agreement on this direction in [whatwg/html#12842](https://github.com/whatwg/html/issues/12842).
 
 ---
 
@@ -68,9 +68,13 @@ Whenever **the platform moves focus to the viewport** because the focused elemen
 
 This happens whether or not the document currently has system focus, so a reset that happens in a background tab or an unfocused `<iframe>` is not lost.
 
-During [update the rendering](https://html.spec.whatwg.org/multipage/webappapis.html#update-the-rendering), **immediately after the [focus fixup rule](https://html.spec.whatwg.org/multipage/webappapis.html#focus-fixup-rule) step**, if focus has **not** moved to another focusable area in the meantime (which cancels the pending `focusreset`), the user agent fires a `FocusResetEvent` named `focusreset` (`bubbles: true`, `composed: true`, `cancelable: false`) at the pending target, with `relatedTarget` exposing the element that lost focus (retargeted against `currentTarget`).
+During [update the rendering](https://html.spec.whatwg.org/multipage/webappapis.html#update-the-rendering), **immediately after the [focus fixup rule](https://html.spec.whatwg.org/multipage/webappapis.html#focus-fixup-rule) step**, if focus has **not** moved to another focusable area in the meantime (which cancels the pending `focusreset`), the user agent fires a `FocusResetEvent` named `focusreset` (`bubbles: true`, `composed: true`, `cancelable: true`) at the pending target, with `relatedTarget` exposing the element that lost focus (retargeted against `currentTarget`). Dispatch waits while:
+- **the document doesn't [have focus](https://html.spec.whatwg.org/multipage/interaction.html#has-focus-steps)** (a background tab, an unfocused window, or an `<iframe>` the user isn't interacting with). The event fires in the first rendering update after the document gets focus, **before the user sees the frame**. When the user returns to the tab, the page has already put focus back where it belongs, and a handler's `.focus()` never pulls focus into a frame the user isn't using. If the user gives the frame focus by clicking a focusable element in it, that focus change cancels the pending event.
+- **a Navigation API navigation that will reset focus is in progress** (see [Navigation API](#navigation-api)). The navigation's own focus reset takes over.
 
-Hidden documents (background tabs, documents in the back/forward cache) don't run *update the rendering*, so for them the event fires in the first rendering update after they become visible again, **before the user sees the frame**. When the user returns to the tab, the page has already had a chance to put focus back where it belongs.
+#### Coordinating listeners with `preventDefault()`
+
+Because the event bubbles, several listeners can see the same reset: an inner widget, an enclosing dialog, and a page-level coordinator. If they all called `.focus()`, the outermost listener would win. `focusreset` has no default action, so it uses `cancelable` as a "handled" flag, the same convention `click` handlers use with `defaultPrevented`: **a listener that restores focus calls `preventDefault()`, and listeners skip the event if `e.defaultPrevented` is already true.** The innermost listener that can handle the reset wins.
 
 ```webidl
 [Exposed=Window]
@@ -94,8 +98,10 @@ dialog.addEventListener("focusreset", (e) => {
   // hidden, display:none, inert, or inside a child ShadowRoot) and nothing
   // else claimed focus before rendering.
   // `e.target` is the surviving ancestor; `e.relatedTarget` is the element
-  // that lost focus (retargeted across shadow boundaries):
+  // that lost focus (retargeted across shadow boundaries).
+  if (e.defaultPrevented) return; // an inner listener already handled it
   fallbackElement.focus();
+  e.preventDefault();
 });
 ```
 
@@ -107,11 +113,13 @@ dialog.addEventListener("focusreset", (e) => {
 Because `focusreset` fires on the nearest surviving ancestor and bubbles (`composed: true`), a `<dialog>` or container can listen directly on itself—no `document` listener cleanup required, and all involuntary resets (`remove()`, `disabled`, `display: none`, `inert`, and internal Shadow DOM removals) are handled in one place:
 
 ```js
-dialog.addEventListener("focusreset", () => {
+dialog.addEventListener("focusreset", (e) => {
+  if (e.defaultPrevented || !dialog.open) return;
   const firstFocusable = dialog.querySelector(
     "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"
   );
   (firstFocusable ?? dialog).focus();
+  e.preventDefault();
 });
 ```
 
@@ -128,11 +136,13 @@ class TodoList extends HTMLElement {
       this.#lastIndex = items.indexOf(e.target.closest("li[tabindex]"));
     });
 
-    this.addEventListener("focusreset", () => {
+    this.addEventListener("focusreset", (e) => {
+      if (e.defaultPrevented) return;
       const items = [...this.querySelectorAll("li[tabindex]:not([hidden])")];
       const next = items[Math.min(this.#lastIndex, items.length - 1)];
       this.#lastIndex = -1;
       (next ?? this).focus();
+      e.preventDefault(); // so an enclosing dialog or page listener doesn't override this
     });
   }
 }
@@ -144,7 +154,12 @@ Because `focusreset` bubbles up to `Document` and exposes the removed or unfocus
 
 ```js
 document.addEventListener("focusreset", (e) => {
-  if (e.relatedTarget?.id) document.getElementById(e.relatedTarget.id)?.focus();
+  if (e.defaultPrevented || !e.relatedTarget?.id) return;
+  const replacement = document.getElementById(e.relatedTarget.id);
+  if (replacement) {
+    replacement.focus();
+    e.preventDefault();
+  }
 });
 ```
 
@@ -152,21 +167,33 @@ document.addEventListener("focusreset", (e) => {
 
 ## Processing Model
 
-At a high level, `focusreset` integrates into three existing HTML Standard hooks (`removing steps`, `focus update steps`, and `update the rendering`):
+At a high level, `focusreset` integrates into existing HTML Standard hooks (`removing steps`, `focus update steps`, `update the rendering`, and the Navigation API's `potentially reset the focus`):
 
 1. **What is recorded:** Whenever a `Document` resets focus to the viewport (whether or not it currently has system focus)—either synchronously on DOM removal (`#node-remove-focus-fixup`) or during rendering (`#focus-fixup-rule` for `disabled`, `hidden`, `inert`, `display: none`, `visibility: hidden`, etc.)—the `Document` records a **pending `focusreset` target** (the element itself if still connected, or its nearest surviving connected ancestor, walking further up if that ancestor is also removed before rendering) and a **pending `focusreset` related target** (the `Element` that lost focus).
 2. **What cancels it:** Any successful focus transfer to a non-viewport focusable area before dispatch (`replacement.focus()`, `dialog.showModal()`, `autofocus`, or user navigation)—whether in synchronous code, microtasks, `useEffect`, `requestAnimationFrame`, or `ResizeObserver`—clears the pending fields and cancels `focusreset`. No-op calls (such as `.focus()` on a disabled/removed element) do not cancel it.
-3. **When it fires:** Immediately after `#focus-fixup-rule` in the `Document`'s next *update the rendering* (before `IntersectionObserver` and paint), if `pending focusreset target` is still non-null, the browser clears both pending fields and fires `FocusResetEvent("focusreset", { bubbles: true, composed: true })` at that target. For a hidden `Document`, that is the first rendering update after it becomes visible.
+3. **When it fires:** Immediately after `#focus-fixup-rule` in the `Document`'s next *update the rendering* (before `IntersectionObserver` and paint), if `pending focusreset target` is still non-null, the `Document` [has focus](https://html.spec.whatwg.org/multipage/interaction.html#has-focus-steps), and no Navigation API navigation that will reset focus is in progress, the browser clears both pending fields and fires `FocusResetEvent("focusreset", { bubbles: true, composed: true, cancelable: true })` at that target. Otherwise the pending fields are kept for a later rendering update.
 
 Handlers run before paint, so a handler that calls `.focus()` can scroll the newly focused element into view before the frame is painted. This is intentional: the user sees focus (and scroll position) already restored, never the intermediate state.
 
 | Boundary / Case | Behavior |
 |---|---|
 | **Shadow DOM** | `bubbles: true, composed: true`. Inside the shadow tree, `target` and `relatedTarget` expose the internal shadow nodes; across the shadow boundary, both retarget to `shadowRoot.host` (even if `relatedTarget` was detached from the `ShadowRoot` before dispatch), preserving closed-shadow encapsulation. |
-| **Background tabs, unfocused windows & `<iframe>`s** | Recorded regardless of system focus. Visible documents fire at their next rendering update; hidden documents fire at the first rendering update after becoming visible. A handler in an unfocused `<iframe>` that calls `.focus()` follows the existing rules for focusing inside an unfocused frame; handlers that must not pull focus into the frame can check `document.hasFocus()`. If `iframeBtn.remove(); iframe.remove();` run in the same frame, the `<iframe>`'s document is discarded, so `focusreset` fires only in the parent `Document` (with `relatedTarget === iframe`). |
+| **Background tabs, unfocused windows & `<iframe>`s** | Recorded regardless of system focus, but dispatched only once the `Document` has focus, so a handler's `.focus()` can never pull focus from the parent page into an `<iframe>`, or from another window. A background tab fires when the user returns to it. An unfocused `<iframe>` fires when the user moves focus into it, unless that focus move lands on a focusable element, which cancels the pending event. If `iframeBtn.remove(); iframe.remove();` run in the same frame, the `<iframe>`'s document is discarded, so `focusreset` fires only in the parent `Document` (with `relatedTarget === iframe`). |
 | **`dialog.close()` & `hidePopover()`** | See [Dialogs and popovers](#dialogs-and-popovers) below. |
 | **Reparenting vs. `moveBefore()`** | `appendChild` runs `remove()` first, anchoring `pending focusreset target` to the original parent; `moveBefore()` preserves connectedness and focus unless moved into an `inert`/hidden subtree (caught by `#focus-fixup-rule`). |
-| **Explicit `element.blur()` & Navigation API** | Neither triggers `focusreset` (`blur()` is intentional author action; Navigation API's post-transition focus reset is a page-level navigation transition). |
+| **Explicit `element.blur()`** | Doesn't trigger `focusreset`: `blur()` is an intentional author action. |
+| **Navigation API** | See [Navigation API](#navigation-api) below. |
+
+### Navigation API
+
+An intercepted navigation (`navigateEvent.intercept()`) resets focus itself when it finishes, unless `focusReset: "manual"` is used or focus moved during the navigation. Route changes usually replace the focused content, so without coordination `focusreset` listeners would fire mid-transition and race the navigation's own focus reset, or move focus somewhere that stops the navigation from resetting it.
+
+- **While a navigation whose focus reset behavior isn't `"manual"` is in progress, a pending `focusreset` is held, not dispatched.**
+- **If the navigation resets focus when it finishes** (to the first `autofocus` element or the `<body>`), the pending `focusreset` is cleared: the navigation's reset covers it.
+- **If the navigation doesn't reset focus** (`focusReset: "manual"`, focus moved during the navigation, or the navigation failed or was aborted), the pending `focusreset` fires at the next rendering update as usual.
+- The navigation's own reset never triggers `focusreset`.
+
+So the Navigation API owns focus during route transitions and `focusreset` covers everything else.
 
 ### Dialogs and popovers
 
@@ -178,7 +205,9 @@ Closing a dialog or popover that contains focus is the most common source of foc
 ```js
 list.addEventListener("focusreset", (e) => {
   // Fires if the opener (a deleted list item) can't take focus back.
+  if (e.defaultPrevented) return;
   (list.querySelector("li[tabindex]") ?? list).focus();
+  e.preventDefault();
 });
 ```
 
@@ -189,7 +218,7 @@ Because the event's target is inside the closed `<dialog>`, a listener on the di
 <details>
 <summary><strong>Full Normative Processing Model & Edge-Case Rationale</strong></summary>
 
-All required specification hooks (`removing steps`, `focus update steps`, and `update the rendering`) already exist in the HTML Standard—no changes to the DOM Standard are required.
+All required specification hooks (`removing steps`, `focus update steps`, `update the rendering`, and the Navigation API's `potentially reset the focus`) already exist in the HTML Standard—no changes to the DOM Standard are required.
 
 Each `Document` has:
 - an associated **pending `focusreset` target** (a `Node` or `null`, initially `null`)—whenever non-null, it is **always [connected](https://dom.spec.whatwg.org/#connected)** (`target`'s shadow-including root is `Document`); and
@@ -248,22 +277,28 @@ In HTML's [update the rendering](https://html.spec.whatwg.org/multipage/webappap
 
 2. **Immediately after `#focus-fixup-rule`:** For each *doc* of *docs* (which, as today, only includes documents that are being rendered; a hidden document keeps its pending fields until it is rendered again):
    1. Let *target* be *doc*'s **pending `focusreset` target**, and let *related* be *doc*'s **pending `focusreset` related target**.
-   2. Set *doc*'s **pending `focusreset` target** to `null` and *doc*'s **pending `focusreset` related target** to `null`.
-   3. If *target* is non-null:
-      1. Assert: *target* is [connected](https://dom.spec.whatwg.org/#connected) and *target*'s node document is *doc*.
-      2. Fire an event named `focusreset` at *target*, using `FocusResetEvent`, with `bubbles` set to `true`, `composed` set to `true`, internal `relatedTarget` set to *related*, and internal `contextTarget` set to *target* (where `FocusResetEvent.prototype.relatedTarget`'s getter returns the result of **retargeting a `focusreset` related target** given internal `relatedTarget`, internal `contextTarget`, and `this.currentTarget`).
+   2. If *target* is null, then continue.
+   3. If the [has focus steps](https://html.spec.whatwg.org/multipage/interaction.html#has-focus-steps) given *doc* return false, then continue (keep the pending fields).
+   4. If *doc*'s relevant global object's navigation API has an ongoing navigate event whose focus reset behavior is not `"manual"`, then continue (keep the pending fields; see § 5).
+   5. Set *doc*'s **pending `focusreset` target** to `null` and *doc*'s **pending `focusreset` related target** to `null`.
+   6. Assert: *target* is [connected](https://dom.spec.whatwg.org/#connected) and *target*'s node document is *doc*.
+   7. Fire an event named `focusreset` at *target*, using `FocusResetEvent`, with `bubbles` set to `true`, `composed` set to `true`, `cancelable` set to `true`, internal `relatedTarget` set to *related*, and internal `contextTarget` set to *target* (where `FocusResetEvent.prototype.relatedTarget`'s getter returns the result of **retargeting a `focusreset` related target** given internal `relatedTarget`, internal `contextTarget`, and `this.currentTarget`). The event has no default action; its canceled flag only tells later listeners that the reset was handled.
 
 Why this timing works across both frameworks and low-level DOM code:
 - **Framework-friendly**: Synchronous handlers, microtasks (`LitElement.updated`, `Promise.then`), post-commit hooks (`useEffect`), `requestAnimationFrame` callbacks, and `ResizeObserver` callbacks all get a chance to call `nextElement.focus()` and cancel `focusreset` before it fires.
 - **Pre-paint (including `rAF` / `ResizeObserver` removals)**: Because the focus fixup step runs *after* `requestAnimationFrame` and `ResizeObserver`, focus losses triggered inside `rAF` or `ResizeObserver` still fire `focusreset` before the frame is painted. A handler's `.focus()` call may scroll the new target into view before paint; that is intended, so the first painted frame already shows the restored focus.
-- **Coalesced and loop-safe**: Multiple focus/reset cycles in the same frame coalesce to a single `focusreset`, and clearing both pending fields before dispatch prevents infinite recursion. A detached `relatedTarget` is held for at most one frame in a visible document; a hidden document holds at most one such element until it is rendered again or focus moves.
-- **Background documents**: Recording does not depend on system focus, so a reset caused by a timer, push message, or network response in a background tab is delivered before the user sees the tab again, instead of being silently lost.
+- **Coalesced and loop-safe**: Multiple focus/reset cycles in the same frame coalesce to a single `focusreset`, and clearing both pending fields before dispatch prevents infinite recursion. A detached `relatedTarget` is held for at most one frame in a focused, visible document; a document without focus holds at most one such element until it gets focus or focus moves.
+- **Background and unfocused documents**: Recording does not depend on system focus, so a reset caused by a timer, push message, or network response in a background tab is delivered when the user returns, before they see the tab, instead of being silently lost. Waiting for focus before dispatch means a handler's `.focus()` only ever moves focus *within* the document the user is interacting with.
+
+### 5. Navigation API Integration
+
+In the Navigation API's [potentially reset the focus](https://html.spec.whatwg.org/multipage/nav-history-apis.html#potentially-reset-the-focus) steps, after focus has been reset (to the autofocus candidate, the `<body>`, or the viewport), set the document's **pending `focusreset` target** and **pending `focusreset` related target** to `null`. If those steps return early without resetting focus (focus reset behavior `"manual"`, or focus changed during the navigation), the pending fields are left alone, and § 3.2 dispatches them at the next rendering update once the navigate event is no longer ongoing.
 
 ### 4. Shadow DOM Encapsulation & Propagation Details
 
 - **Why `FocusResetEvent` (like HTML's `ToggleEvent` / `CommandEvent`) rather than `FocusEvent`**: Events that populate DOM `Event`'s internal `relatedTarget` slot (such as `FocusEvent`) trigger DOM `dispatch`'s shadow-boundary suppression rule (`Otherwise, if parent is relatedTarget, then set parent to null`), which stops propagation at `shadowRoot.host` whenever `target` and `relatedTarget` originate inside the same shadow tree. Using `FocusResetEvent` with getter-level retargeting (matching `CommandEvent.prototype.source` and `ToggleEvent.prototype.source`) lets `focusreset` compose all the way to `Document` while keeping `relatedTarget` encapsulated.
 - **Shadow host also removed (`shadowBtn.remove(); host.remove();`)**: Per [DOM § 4.2.2 (`shadow-including descendant`)](https://dom.spec.whatwg.org/#concept-shadow-including-descendant), `host` is a shadow-including inclusive ancestor of both internal shadow elements and `ShadowRoot` itself. Removing `host` advances **pending `focusreset` target** to `host`'s surviving light-DOM parent and retargets **pending `focusreset` related target** from `shadowBtn` to `host` via § 1.2.3—so light-DOM listeners see `event.relatedTarget === host` without leaking `shadowBtn`.
-- **Inner component handled vs. outer trap**: If an inner shadow listener calls `internalFallback.focus()`, then by the time outer light-DOM bubble listeners run, `document.activeElement` is already `host` (no longer `document.body`), or the inner component can call `event.stopPropagation()`.
+- **Inner component handled vs. outer trap**: An inner shadow listener that calls `internalFallback.focus()` also calls `event.preventDefault()`. Outer light-DOM listeners check `event.defaultPrevented` and leave focus alone, so the innermost handler wins. (`stopPropagation()` also works, but hides the event from page-level observers such as analytics or accessibility tooling.)
 - **Relationship to legacy synchronous `blur` on removal ([whatwg/html#12842](https://github.com/whatwg/html/issues/12842))**: `focusreset` is independent of it: it fires the same way whether or not an engine also fires a legacy `blur`. Major UI libraries (`Radix`, `MUI`, `focus-trap`) already maintain fallback paths for engines without `blur` on removal; `focusreset` gives them one standard container-level signal, which makes it possible for engines to retire the legacy behavior on their own schedule.
 
 </details>
@@ -278,7 +313,9 @@ Why this timing works across both frameworks and low-level DOM code:
 - **Firing `blur` / `focusout` asynchronously on the nearest surviving ancestor**: Semantically inaccurate on removal (the ancestor itself was never focused), and `focusout` cannot distinguish *"focus dropped to the viewport"* from ordinary focus movement into closed Shadow DOM or non-focusable click targets.
 - **Reusing `FocusEvent` directly**: `FocusEvent` binds to DOM `Event`'s internal `relatedTarget` slot, which triggers DOM `dispatch`'s shadow-boundary suppression rule (`parent === relatedTarget`) and would swallow `focusreset` at `shadowRoot.host` whenever focus was lost inside a shadow tree; in addition, plain DOM `retarget()` does not retarget a node already detached from its `ShadowRoot`. Defining `FocusResetEvent` with getter retargeting (like `CommandEvent` and `ToggleEvent`) avoids both issues.
 - **Firing unconditionally even when another element gained focus**: Would cause fallback handlers and focus traps to overwrite intentional `nextElement.focus()` calls.
-- **Firing only while the document has system focus**: An earlier draft checked [has focus steps](https://html.spec.whatwg.org/multipage/interaction.html#has-focus-steps) when recording and when dispatching. Resets in background tabs (timers, push messages, network responses) were then silently dropped, and a returning user found the dialog or widget already broken.
+- **Dropping resets while the document lacks system focus**: An earlier draft checked [has focus steps](https://html.spec.whatwg.org/multipage/interaction.html#has-focus-steps) when recording as well as when dispatching. Resets in background tabs (timers, push messages, network responses) were then silently dropped, and a returning user found the dialog or widget already broken. This revision checks focus only at dispatch time and keeps the reset pending until then.
+- **Dispatching regardless of focus**: Fixes the background-tab case too, but lets a handler in an unfocused `<iframe>` call `.focus()` and pull focus away from the page the user is typing in.
+- **Non-cancelable event, or automatically stopping propagation once focus moves**: With a plain bubbling event, every ancestor's handler runs and the outermost `.focus()` wins. DOM dispatch has no hook for stopping propagation based on focus state, so `cancelable` + `defaultPrevented` follows the existing convention instead.
 
 ### Naming
 
@@ -289,7 +326,7 @@ The Navigation API has a `focusReset` option (`navigation.navigate(url, { focusR
 ## Security and Privacy
 
 `focusreset` exposes no new cross-origin or encapsulated information:
-- It fires only when the platform resets focus to the viewport within the same `Document`—state already observable via `document.activeElement` and `MutationObserver`. Firing in background documents (when they are next rendered) exposes nothing new: the same script could already poll `document.activeElement` on `visibilitychange`.
+- It fires only when the platform resets focus to the viewport within the same `Document`—state already observable via `document.activeElement` and `MutationObserver`. Firing in background documents (once they next have focus) exposes nothing new: the same script could already poll `document.activeElement` on `visibilitychange`.
 - Both `event.target` and `event.relatedTarget` retarget across shadow boundaries (even when `relatedTarget` was detached from a `ShadowRoot` before dispatch), so closed Shadow DOM internals are never leaked to outer trees; any detached `relatedTarget` reference on `Document` is cleared on the next focus transfer or when the event fires.
 - Cross-origin `<iframe>`s remain isolated per `Document` and per agent, and BFCache / Private Browsing behave identically to normal browsing.
 
