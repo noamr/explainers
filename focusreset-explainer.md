@@ -10,6 +10,9 @@
 - [whatwg/html#13050 — HTML specification PR](https://github.com/whatwg/html/pull/13050)
 - [web-platform-tests/wpt#63595 — WPT PR](https://github.com/web-platform-tests/wpt/pull/63595)
 
+> [!NOTE]
+> **This explainer describes a proposed next revision**, which differs from the open spec PRs ([whatwg/html#13050](https://github.com/whatwg/html/pull/13050), [whatwg/dom#1512](https://github.com/whatwg/dom/pull/1512)) and their tests. Those PRs fire a plain `focusreset` event at the `Document`, in the mutation observer microtask, only on DOM removal, and only while the document has focus. This revision fires a bubbling `FocusResetEvent` at the nearest surviving ancestor, during *update the rendering*, for every platform focus reset (including `disabled`, `inert`, and `display: none`), and does not drop resets that happen while the document lacks system focus. The spec PRs will be updated once there is agreement on this direction in [whatwg/html#12842](https://github.com/whatwg/html/issues/12842).
+
 ---
 
 ## The Problem
