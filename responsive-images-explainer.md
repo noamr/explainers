@@ -16,21 +16,13 @@
 
 ---
 
-## Introduction: Moving the Knobs from the Browser to the Website
+## Introduction
 
 Every responsive image on the web sits on a trade-off curve between **visual sharpness** and **bandwidth**:
 - Pick a candidate that is too small (or upscale it beyond its native resolution), and the user sees a **blurry, pixelated image**.
 - Pick a candidate that is too large, and the user pays in **wasted bandwidth, slower page loads, and higher memory use**.
 
-When `srcset` and `sizes` were designed in 2014, the specification gave authors a single 1D width hint (`sizes`), derived both candidate density and `img.naturalWidth` from that 1D width, and left candidate selection *"implementation-defined"* so browsers could experiment with bandwidth-saving heuristics.
-
-A decade of production experience has clarified where browser behavior should be standardized and where websites need direct control:
-- **User Agents are designed for interoperability, while websites are best suited to measure context-specific business trade-offs.** A browser cannot know whether a given `<img>` is a conversion-critical product photo (where blurriness hurts sales), an interactive hero that will scale up on click, or a decorative backdrop / below-the-fold card (where capping density at `1.5x` on a `3x` phone cuts pixel count by **75%** with negligible visual loss).
-- **Browser selection has converged and can be standardized.** Chrome retired its geometric-mean density rounding and `Save-Data` clamping experiments in late 2024, meaning WebKit, Gecko, and Blink now all use the same baseline selection rule (`first candidate >= targetDensity`, or the largest if none). Chrome also retains an optimization to avoid downloading a lower-resolution source when a higher-resolution candidate is already loaded/cached—behavior that can be **permitted via an explicit `MAY`** rather than leaving the entire selection algorithm implementation-defined.
-
-**The theme of this proposal:**
-1. **Standardize the browser baseline (`#13077`)** — define the end-to-end source selection algorithm (including reusing already-loaded/cached higher-resolution sources) normatively for interoperability.
-2. **Give the knobs to the website (`#13069`, `#12248`, `#11428`, `#12565`)** — empower the site owner (who knows the content and can A/B test UX and business impact) to clamp target density via `mindensity` and `maxdensity`, handle 2D `object-fit` sizing (`cover`, `contain`, `scale-down`, `none`) with `h` descriptors, and inspect true intrinsic dimensions via `imageWidth`, `imageHeight`, and `imageAspectRatio`.
+Today the browser picks alone, from a single 1D width hint (`sizes`), so it can't tell a conversion-critical product photo from a decorative below-the-fold card, and it ignores `object-fit` cropping and letterboxing. This proposal gives the website, which knows the content and can A/B test the trade-off, a few precise knobs, and fixes the cases where today's rules pick the wrong image.
 
 ### At a Glance
 
@@ -47,6 +39,18 @@ A decade of production experience has clarified where browser behavior should be
   // → 600, 450, 1.3333333333333333 (vs. naturalWidth === 400)
 </script>
 ```
+
+### Independently Shippable Parts
+
+Each part stands alone; none requires another to ship. In priority order:
+
+| # | Part | Issue | Notes |
+|---|---|---|---|
+| 1 | `mindensity` / `maxdensity` | [#13069](https://github.com/whatwg/html/issues/13069) | Specified as a clamp on the target density; works with today's selection text. |
+| 2 | 2D `sizes`, `h` descriptors, `object-fit`-aware `sizes="auto"` | [#12248](https://github.com/whatwg/html/issues/12248), [PR #13053](https://github.com/whatwg/html/pull/13053) | Changes only how the source size is computed per candidate. |
+| 3 | `imageWidth` / `imageHeight` / `imageAspectRatio` | [#12565](https://github.com/whatwg/html/issues/12565) | Read-only getters. |
+| 4 | No upscaling under `object-fit: none` / `scale-down` | [#11428](https://github.com/whatwg/html/issues/11428) | A CSS Images change; needs compat data. |
+| 5 | Normative selection algorithm | [#13077](https://github.com/whatwg/html/issues/13077) | Spec cleanup that writes down what engines already do; parts 1 and 2 slot into it. |
 
 ---
 
@@ -65,7 +69,7 @@ Today, sites must **lie in markup** to nudge selection:
 
 ### 2. Blurry `object-fit: cover` cards & bloated `object-fit: contain` banners ([#12248](https://github.com/whatwg/html/issues/12248))
 `sizes` only expresses a 1D width, ignoring container height and `object-fit`:
-- **Blurry images with `object-fit: cover`**: Most listing grids (e.g., Airbnb cards) render wide photos inside fixed-ratio boxes using `object-fit: cover`. A 4:3 photo in a `400px × 400px` square card is drawn at `533px × 400px` (`1.33×` the box width). Using 1D `sizes="400px"` or `sizes="auto"` content-box width under-fetches resolution by **33%** (and by **78%** for a 16:9 photo), leaving images visibly soft.
+- **Blurry images with `object-fit: cover`**: Most listing grids (e.g., Airbnb cards) render wide photos inside fixed-ratio boxes using `object-fit: cover`. A 4:3 photo in a `400px × 400px` square card is drawn at `533px × 400px` (`1.33×` the box width). Using 1D `sizes="400px"` or `sizes="auto"` content-box width fetches an image **25% too narrow** (**44%** for a 16:9 photo), which is then upscaled `1.33×` (`1.78×`), leaving images visibly soft.
 - **Massive bandwidth waste with `object-fit: contain`**: A 1:1 image inside a wide `1000px × 100px` container with `object-fit: contain` renders at `100px × 100px`. A 1D content-box width of `1000px` fetches a `1000w` image—**10× too wide** (**100× too many pixels**).
 - **Infinite download loops in the current spec**: The HTML spec currently defines `sizes="auto"` using CSS *concrete object size*, which depends on the loaded image's aspect ratio under `object-fit: contain`. Once a candidate loads, its aspect ratio changes the concrete object width, which triggers a new `srcset` selection—oscillating in an **infinite download loop** when candidates have different aspect ratios.
 
@@ -78,13 +82,7 @@ However, when `srcset` with `w` descriptors is used, the browser computes `densi
 
 Because CSS `object-fit: none` and `scale-down` size the image using its density-corrected `naturalWidth` (`800px`), **both `object-fit: none` and `scale-down` upscale the `200px` image to `800px`**, resulting in a blurry image and defeating the purpose of `scale-down` and `none`!
 
-### 4. Unnecessary "implementation-defined" spec baseline ([#13077](https://github.com/whatwg/html/issues/13077))
-The HTML Standard still states:
-> *"In an implementation-defined manner, choose one image source..."*
-
-Today, WebKit, Gecko, and Blink all implement the same baseline rule (`first candidate >= targetDensity`), and Chrome's optimization to keep an already-loaded higher-resolution candidate rather than re-fetching a smaller one can be standardized. Leaving the entire selection step "implementation-defined" blocks normative Web Platform Tests (WPT) and prevents authors from having a predictable baseline for new knobs.
-
-### 5. Blindfolds on true pixel dimensions and aspect ratio ([#12565](https://github.com/whatwg/html/issues/12565), [PR #13046](https://github.com/whatwg/html/pull/13046))
+### 4. Blindfolds on true pixel dimensions and aspect ratio ([#12565](https://github.com/whatwg/html/issues/12565), [PR #13046](https://github.com/whatwg/html/pull/13046))
 Because `w` descriptors divide `naturalWidth` by `density` (and with [PR #13046](https://github.com/whatwg/html/pull/13046) `naturalWidth` always equals `sourceSize`), under `sizes="auto"`, `img.naturalWidth` echoes the element's CSS layout width (`img.clientWidth`), and `naturalWidth / naturalHeight` suffers from integer-rounding quantization (or returns `0 / 0` for `viewBox`-only SVGs).
 
 As a result, websites cannot read the true pixel dimensions or exact intrinsic aspect ratio of the resource the browser selected:
@@ -187,10 +185,32 @@ Grammar extension for `<source-size-value>`:
 <source-size-value> = <length> | auto | <fit-modifier> <length>{2}
 <fit-modifier>      = cover | contain
 ```
-*(In legacy browsers, an unrecognized `<source-size-value>` fails parsing for that comma-separated item and falls through to the trailing 1D `400px` fallback.)*
+*(In legacy browsers, an unrecognized `<source-size-value>` fails parsing for that comma-separated item and falls through to the trailing 1D `400px` fallback. A `sizes` with only 2D items would fall back to `100vw` there, so **if `sizes` contains a 2D item, its last item must be a 1D `<length>` (or `auto`)**; this is a conformance requirement, checked by validators.)*
 
-#### D. Fix unexpected upscaling under `object-fit: scale-down` and `none` ([#11428](https://github.com/whatwg/html/issues/11428))
-When an `<img>` has no explicit `width`/`height` dimension attributes and its computed `object-fit` is `none` or `scale-down`, clamp the density divisor used to compute CSS intrinsic size (`naturalWidth` / layout natural size) to `>= 1.0` (or `>= devicePixelRatio` when scaling to physical pixels is undesired, i.e., `naturalWidth = min(sourceSize, imageWidth)`), so a `200w` image inside an `800px` `object-fit: scale-down` container renders at `200px` rather than upscaling to `800px`.
+#### D. Don't upscale under `object-fit: scale-down` and `none` ([#11428](https://github.com/whatwg/html/issues/11428))
+Define this in CSS object-fit sizing, not in `naturalWidth`:
+- HTML exposes the image's **unscaled natural size**, i.e. its natural size before the `srcset` density is applied (the same values as `imageWidth` / `imageHeight`).
+- CSS Images: for `object-fit: none` and `scale-down`, the concrete object size is additionally capped at that unscaled natural size. In other words, the density used for these two values is clamped to `>= 1.0`, so an image is never drawn wider than its file's pixel width in CSS pixels, exactly like a plain `<img src>` without `srcset`.
+- `naturalWidth` / `naturalHeight` are unchanged (they still equal the source size, per [PR #13046](https://github.com/whatwg/html/pull/13046)), the rule doesn't depend on `width` / `height` attributes, and candidate selection is unaffected.
+
+So a `200w` image inside an `800px` `object-fit: scale-down` box renders at `200px` rather than upscaling to `800px`.
+
+**Compat:** this changes rendering for existing pages that combine a `w`-descriptor `srcset`, `object-fit: none` / `scale-down`, and a selected density below `1`. Those pages currently get the blurry upscale that #11428 reports. *TODO: UseCounter / HTTP Archive numbers for that combination.*
+
+<details>
+<summary><strong>Worked example: selection and rendering together</strong></summary>
+
+Logo candidates `logo-200.png 200w 200h, logo-400.png 400w 400h, logo-800.png 800w 800h`, `sizes="auto"`, an `800px × 600px` box, DPR `2`:
+
+| | `object-fit: scale-down` | `object-fit: none` |
+|---|---|---|
+| Source width (Step 2) | contain: `min(800, 600 × 1) = 600` | `800` (box width) |
+| Densities | `0.33`, `0.67`, `1.33` | `0.25`, `0.5`, `1.0` |
+| Selected (target `2`, none reach it, so the highest) | `logo-800.png` | `logo-800.png` |
+| Rendered | contain gives `600`, cap at `800` → **`600 × 600`** | `min(800, 800)` → **`800 × 800`**, cropped to the box |
+| Same, but only `logo-200.png` exists | contain gives `600`, cap at `200` → **`200 × 200`** (today: `600`) | **`200 × 200`** (today: `800`) |
+
+</details>
 
 ---
 
@@ -212,11 +232,11 @@ All three getters share the **exact same readiness timing and cross-origin rules
 
 1. **`imageWidth` getter (`unsigned long`):**
    - If `this`'s *current request*'s state is not *available*, or if the underlying image resource has no intrinsic width (e.g., an `<svg viewBox="0 0 16 9">` with no `width` attribute), return `0`.
-   - Otherwise, return the **unscaled intrinsic width** of the *current request*'s image data in CSS/image pixels **before** dividing by the `srcset` candidate's pixel density (rounded to an unsigned integer if needed for non-integer SVG lengths).
+   - Otherwise, return the image's **natural width as `naturalWidth` would compute it, but without dividing by the `srcset` candidate's pixel density**: EXIF orientation and EXIF resolution (HTML's *preferred density-corrected dimensions*) are applied exactly as for `naturalWidth`, including `image-orientation`. Non-integer SVG lengths are rounded to an unsigned integer.
 
 2. **`imageHeight` getter (`unsigned long`):**
    - If `this`'s *current request*'s state is not *available*, or if the underlying image resource has no intrinsic height, return `0`.
-   - Otherwise, return the **unscaled intrinsic height** of the *current request*'s image data **before** dividing by the `srcset` candidate's pixel density.
+   - Otherwise, return the natural height computed the same way as `imageWidth` (orientation and EXIF resolution applied, `srcset` density not applied).
 
 3. **`imageAspectRatio` getter (`double`):**
    - If `this`'s *current request*'s state is not *available*, return `0.0`.
@@ -242,9 +262,22 @@ img.imageAspectRatio; // 1.7777777777777777 (exact 16 / 9 ratio; also works for 
 - **No integer quantization error:** `naturalWidth` and `naturalHeight` are `unsigned long` integers scaled down to `sourceSize` (e.g., `100` and `56` for a `16:9` image in a `100px` slot), which distorts `naturalWidth / naturalHeight`. `imageAspectRatio` returns the exact `double` ratio.
 - **Ergonomic RUM & lightbox math:** Avoids divide-by-zero boilerplate (`img.imageHeight ? img.imageWidth / img.imageHeight : 0`).
 
+**Naming.** `HTMLImageElement` already has `width` (layout), `naturalWidth` (density-corrected) and `clientWidth`. Alternatives considered:
+- `intrinsicWidth`: CSS Images and HTML have renamed "intrinsic dimensions" to "natural dimensions", so this would reintroduce retired terminology next to `naturalWidth`.
+- `naturalPixelWidth`: implies device or file pixels, which is wrong for SVG and EXIF-resolution images.
+- `resourceWidth`: plausible, but "resource" suggests the encoded file, and the value has orientation and EXIF resolution applied.
+
+`imageWidth` / `imageHeight` / `imageAspectRatio` read as "the image's own size, independent of how `srcset` / `sizes` scaled it", and group the three getters under one prefix.
+
 ---
 
 ### 4. Explicit Normative Source Selection Algorithm ([#13077](https://github.com/whatwg/html/issues/13077), [#13069](https://github.com/whatwg/html/issues/13069), [#12248](https://github.com/whatwg/html/issues/12248))
+
+**Why standardize selection?** The knobs above only behave predictably if the baseline they adjust is predictable. Engines have converged:
+- Chrome removed its geometric-mean density rounding and `Save-Data` clamping in late 2024. *TODO: link the Chromium change.*
+- WebKit, Gecko and Blink all pick the first candidate with density `>= targetDensity`, or the largest if none does. *TODO: link engine source or a WPT run.*
+
+Chrome also keeps an already-loaded higher-resolution candidate instead of fetching a smaller one; that is allowed below as an explicit `MAY`. Leaving the whole step "implementation-defined" prevents normative WPTs and gives authors no baseline to tune against.
 
 Replace HTML's *"In an implementation-defined manner, choose one image source"* with a deterministic 6-step baseline across engines:
 
@@ -254,6 +287,8 @@ Replace HTML's *"In an implementation-defined manner, choose one image source"* 
 4. **Target density (`targetDensity`):** Clamp `devicePixelRatio` with `maxdensity` and `mindensity` (`max(min(DPR, maxDensity), minDensity)`), allowing UAs to apply explicit user data-saver or privacy adjustments (`MAY`), while forbidding content-agnostic midpoint-rounding heuristics.
 5. **Preferred candidate (`preferredSource`):** Sort ascending by `c.density` and pick the **first** candidate with `c.density >= targetDensity` (or the highest-density candidate if none reaches `targetDensity`).
 6. **Local cache reuse (`MAY`):** If a sharper candidate (`c.density > preferredSource.density`) is already synchronously available in local cache/memory, reuse it instead of issuing a redundant network request.
+
+**Determinism.** Steps 1–5 are a pure function of markup, layout and DPR. The only intentional non-determinism is in Step 4.5 (explicit user data-saver or privacy adjustments) and Step 6 (cache reuse). WPTs exercise Steps 1–5 with unique, uncached URLs and no user settings, so they can assert `currentSrc` exactly; Step 6 is covered by separate tests that only assert it is *allowed*.
 
 <details>
 <summary><strong>Full Normative Selection Algorithm & Worked Example</strong></summary>
@@ -265,7 +300,7 @@ Replace HTML's *"In an implementation-defined manner, choose one image source"* 
   - `c.url`: candidate URL string
   - `c.w`: integer width descriptor (`> 0`), or `null`
   - `c.h`: integer height descriptor (`> 0`, valid only when `c.w` is non-null), or `null`
-  - `c.x`: floating-point density descriptor (`> 0`, mutually exclusive with `c.w`), or `null`
+  - `c.x`: floating-point density descriptor (`>= 0`, mutually exclusive with `c.w`), or `null`. HTML's srcset parser accepts `0x`; such a candidate sorts lowest in Step 5, so it is selected only if it is the sole candidate, in which case HTML's existing note about infinite natural dimensions applies.
 
 ---
 
@@ -281,6 +316,8 @@ For each candidate `c` in `rawCandidates`:
 
 > **Important:** `c.ratio` **MUST NOT** inspect the decoded dimensions of any previously loaded image on `el`. This guarantees that `sizes="auto"` selection is a pure function of layout box size and declared markup hints, preventing infinite download oscillation loops.
 
+> *Note:* Falling back from `<source>` to `<img>` `width`/`height` matches HTML's existing *dimension attribute source* used for layout. An art-directed `<source>` whose crop differs from the `<img>` should carry its own `width`/`height` attributes or `h` descriptors.
+
 ---
 
 #### Step 2 — Resolve Effective Source Size (`c.sourceWidth`) per Candidate
@@ -288,7 +325,7 @@ For each candidate `c` in `rawCandidates`:
 Let `sizesAttr` be `sourceEl`'s `sizes` attribute if `sourceEl` is non-null and has a `sizes` attribute, otherwise `el`'s `sizes` attribute.
 
 1. **If `el` allows auto-sizes** (`sizesAttr` starts with `auto`, or is omitted on a `loading="lazy"` `<img>` per HTML's auto-sizes rules) **and `el` is being rendered with layout information available**:
-   1. Let `boxWidth >= 0` and `boxHeight >= 0` be the width and height in CSS pixels of `el`'s CSS **content box** (if `el` has no CSS layout box, fall back to `300px` × `150px` or evaluate trailing fallback items in `sizesAttr` per existing HTML rules).
+   1. Let `boxWidth >= 0` and `boxHeight >= 0` be the width and height in CSS pixels of `el`'s CSS **content box**, and record them as `el`'s *last auto-sizes width* and a new *last auto-sizes height*. If `el` is not being rendered, use its last auto-sizes width and height if non-null; otherwise treat `auto` as invalid and continue with the remaining items in `sizesAttr` (Case 2 below), as HTML does today. *(In practice a lazy `sizes="auto"` image is rendered with a box, since `sizes=auto` implies `contain-intrinsic-size: 300px 150px`.)*
    2. Let `fit` be the computed value of `object-fit` on `el`.
    3. For each candidate `c` in `rawCandidates`:
       - If `c.ratio == null`, or `boxHeight == 0`, or `fit` is `"fill"` or `"none"`:
@@ -318,7 +355,7 @@ Initialize an empty list `candidates`.
    1. Compute `c.density`:
       - If `c.w != null`:
         `c.density = c.w / max(c.sourceWidth, 1e-9)`
-        *(Clamping zero-width boxes to `1e-9` preserves strict ordering by `c.w` ascending when `c.sourceWidth == 0`, so Step 5 deterministically picks the smallest `w` candidate rather than collapsing all densities to `Infinity`.)*
+        *(Clamping zero-width boxes to `1e-9` preserves strict ordering by `c.w` ascending when `c.sourceWidth == 0`, so Step 5 deterministically picks the smallest `w` candidate rather than collapsing all densities to `Infinity`. This only matters for zero-size boxes.)*
       - Else if `c.x != null`:
         `c.density = c.x`
       - Else (bare URL with no descriptor, or fallback `src`):
@@ -411,7 +448,7 @@ We initially explored a multiplicative `densityscale` attribute (`targetDensity 
 Because `srcset` candidates are discrete rungs chosen by each site's image CDN (e.g., `1.3×`, `1.5×`, or `2×` steps), a vague keyword with a UA-invented factor either fails to cross a rung boundary (doing nothing) or drops two rungs unexpectedly—the same predictability problem that led Blink to remove its internal bandwidth heuristics in 2024. Explicit numeric `mindensity` and `maxdensity` match numeric `x` descriptors in `srcset`.
 
 ### CSS-only density properties
-While CSS properties could work for `loading="lazy"` images, **eager LCP images** are fetched by the HTML preload scanner before external stylesheets arrive. HTML attributes (`mindensity` / `maxdensity`) work for both eager and lazy images.
+While CSS properties could work for `loading="lazy"` images, **eager LCP images** are fetched by the HTML preload scanner before external stylesheets arrive. HTML attributes (`mindensity` / `maxdensity`) work for both eager and lazy images. A site-wide default (e.g. "cap all below-the-fold images at `2x`") via `<meta>` or CSS would complement the per-image attributes and could be added later.
 
 ### Keep lying in `sizes` or `w` descriptors
 Writing `sizes="50vw"` on a `100vw` image is impossible with `sizes="auto"`, degrades `1x` monitors, and corrupts `img.naturalWidth` ([PR #13046](https://github.com/whatwg/html/pull/13046)). Lying in `w` descriptors (`img.jpg?w=720 800w`) breaks CDN cache reuse and 2D `w`/`h` aspect ratios.
@@ -430,7 +467,7 @@ Client Hints require server-side negotiation, CDN `Vary` configuration, and extr
 - **Accessibility**: Fixing `object-fit: cover` under-fetching (`#12248`), `scale-down`/`none` upscaling (`#11428`), and enabling `mindensity` (`#13069`) ensures diagrams, text-in-images, and zoomable photos remain sharp and legible across `1x` and high-DPR displays.
 - **Internationalization**: None affected.
 - **Performance & Business Impact**:
-  - Sites can cut high-DPR secondary/below-the-fold image pixels by **50–75%** using `maxdensity` (`#13069`) without degrading `1x` displays, and cut up to **90%** on letterboxed `object-fit: contain` images (`#12248`).
+  - Sites can cut high-DPR secondary/below-the-fold image pixels by **50–75%** using `maxdensity` (`#13069`) without degrading `1x` displays, and cut up to **99%** of pixels on letterboxed `object-fit: contain` images (`#12248`).
   - Sites can eliminate blurry `object-fit: cover` cards (`#12248`) and measure exact pixel efficiency in RUM via `imageWidth`, `imageHeight`, and `imageAspectRatio` (`#12565`).
 
 ---
